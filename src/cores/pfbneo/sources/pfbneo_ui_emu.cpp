@@ -137,12 +137,13 @@ static void UpdateCheatMenuUI() {
             CheatInfo *pci = GetCheatInfoByIndex(itemIndex);
             if (pci) {
                 std::string optName = "DISABLED";
-                if (pci->nCurrent > 0 && pci->pOption[pci->nCurrent]) {
-                    optName = pci->pOption[pci->nCurrent]->szOptionName;
-                    if (optName.empty()) optName = "ENABLED";
-                } else if (pci->pOption[0] && strlen(pci->pOption[0]->szOptionName) > 0) {
-                    optName = pci->pOption[0]->szOptionName;
-                }
+		if (pci->pOption[pci->nCurrent] != nullptr && strlen(pci->pOption[pci->nCurrent]->szOptionName) > 0) {
+    		    optName = pci->pOption[pci->nCurrent]->szOptionName;
+		} else if (pci->pOption[0] != nullptr && strlen(pci->pOption[0]->szOptionName) > 0) {
+    		    optName = pci->pOption[0]->szOptionName;
+		} else {
+    		    optName = (pci->nCurrent > 0) ? "ENABLED" : "DISABLED";
+		}
 
                 char lineBuf[256];
                 if (itemIndex == cheatMenuSelected) {
@@ -260,44 +261,51 @@ static int LoadCheatIni(const std::string &filePath) {
             end--;
         }
 
-        if (strncmp(p, "cheat", 5) == 0 && (p[5] == ' ' || p[5] == '\t' || p[5] == '\"')) {
-            char *nameStart = strchr(p, '\"');
-            if (nameStart) {
-                nameStart++;
-                char *nameEnd = strchr(nameStart, '\"');
-                if (nameEnd) {
-                    *nameEnd = '\0';
-                }
-                if (strlen(nameStart) == 0 || (strlen(nameStart) == 1 && nameStart[0] == ' ')) {
-                    pCurrent = nullptr;
-                    continue;
-                }
+        // 在 LoadCheatIni 函数处理 cheat 声明处：
+if (strncmp(p, "cheat", 5) == 0 && (p[5] == ' ' || p[5] == '\t' || p[5] == '\"')) {
+    char *nameStart = strchr(p, '\"');
+    if (nameStart) {
+        nameStart++;
+        char *nameEnd = strchr(nameStart, '\"');
+        if (nameEnd) {
+            *nameEnd = '\0';
+        }
+        
+        // 过滤空名称、纯空格或带有装饰符 (如 >>>> ---- ====) 的注释行
+        std::string rawName = nameStart;
+        while (!rawName.empty() && (rawName.front() == ' ' || rawName.front() == '\t')) rawName.erase(rawName.begin());
+        while (!rawName.empty() && (rawName.back() == ' ' || rawName.back() == '\t')) rawName.pop_back();
 
-                auto *pNew = (CheatInfo *) calloc(1, sizeof(CheatInfo) + sizeof(CheatOption *) * CHEAT_MAX_OPTIONS);
-                strncpy(pNew->szCheatName, nameStart, sizeof(pNew->szCheatName) - 1);
-                pNew->nDefault = 0;
-                pNew->nCurrent = 0;
-                pNew->nStatus = 0;
-                pNew->nType = 0;
-                pNew->bRestoreOnDisable = 1;
-
-                auto *pOpt0 = (CheatOption *) calloc(1, sizeof(CheatOption) + sizeof(CheatAddressInfo) * 2);
-                strncpy(pOpt0->szOptionName, "Disabled", sizeof(pOpt0->szOptionName) - 1);
-                pOpt0->AddressInfo[0].nAddress = 0;
-                pNew->pOption[0] = pOpt0;
-
-                if (!pCheatInfo) {
-                    pCheatInfo = pNew;
-                } else if (pLast) {
-                    pLast->pNext = pNew;
-                    pNew->pPrevious = pLast;
-                }
-                pLast = pNew;
-                pCurrent = pNew;
-                totalCheats++;
-            }
+        if (rawName.empty() || rawName[0] == '>' || rawName[0] == '-' || rawName[0] == '=') {
+            pCurrent = nullptr;
             continue;
         }
+
+        auto *pNew = (CheatInfo *) calloc(1, sizeof(CheatInfo) + sizeof(CheatOption *) * CHEAT_MAX_OPTIONS);
+        strncpy(pNew->szCheatName, rawName.c_str(), sizeof(pNew->szCheatName) - 1);
+        pNew->nDefault = 0;
+        pNew->nCurrent = 0;
+        pNew->nStatus = 0;
+        pNew->nType = 0;
+        pNew->bRestoreOnDisable = 1;
+
+        auto *pOpt0 = (CheatOption *) calloc(1, sizeof(CheatOption) + sizeof(CheatAddressInfo) * 2);
+        strncpy(pOpt0->szOptionName, "Disabled", sizeof(pOpt0->szOptionName) - 1);
+        pOpt0->AddressInfo[0].nAddress = 0;
+        pNew->pOption[0] = pOpt0;
+
+        if (!pCheatInfo) {
+            pCheatInfo = pNew;
+        } else if (pLast) {
+            pLast->pNext = pNew;
+            pNew->pPrevious = pLast;
+        }
+        pLast = pNew;
+        pCurrent = pNew;
+        totalCheats++;
+    }
+    continue;
+}
 
         if (!pCurrent) continue;
 
