@@ -1,0 +1,4655 @@
+diff --git a/ui/CMakeLists.txt b/src/skeleton/CMakeLists.txt
+similarity index 71%
+rename from ui/CMakeLists.txt
+rename to src/skeleton/CMakeLists.txt
+index f825305..732f403 100644
+--- a/ui/CMakeLists.txt
++++ b/src/skeleton/CMakeLists.txt
+@@ -1,4 +1,4 @@
+-cmake_minimum_required(VERSION 3.0)
++cmake_minimum_required(VERSION 3.10)
+ #set(CMAKE_VERBOSE_MAKEFILE ON)
+ 
+ project(cross2dui)
+@@ -6,10 +6,13 @@ project(cross2dui)
+ #################
+ # libcross2dui
+ #################
+-set(CROSS2DUI_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR})
++include(FindPkgConfig)
++
++set(CROSS2DUI_INCLUDE ..)
+ file(GLOB CROSS2DUI_SOURCE
+         ${CMAKE_CURRENT_SOURCE_DIR}/*.c*
+-        ${CMAKE_CURRENT_SOURCE_DIR}/skin/*.c*)
++        ${CMAKE_CURRENT_SOURCE_DIR}/skin/*.c*
++)
+ 
+ set(FLAGS -D__SSCRAP__)
+ 
+@@ -25,22 +28,30 @@ if (OPTION_MPV_PLAYER)
+     if (PLATFORM_WINDOWS)
+         list(APPEND LDFLAGS mpv.dll.a)
+     else ()
+-        include(FindPkgConfig)
+         pkg_search_module(MPV REQUIRED mpv)
+         list(APPEND CROSS2DUI_INCLUDE ${MPV_INCLUDE_DIRS})
+         list(APPEND LDFLAGS ${MPV_LIBRARIES})
+     endif ()
++    # TODO: fix mpv.pc ?
++    if (PLATFORM_SWITCH)
++        list(APPEND LDFLAGS drm_nouveau)
++    endif ()
+     list(APPEND FLAGS -D__MPV__)
+ endif ()
+ 
+-if (OPTION_BUILTIN_MINIZIP)
++# minizip
++pkg_search_module(MINIZIP minizip)
++if (MINIZIP_FOUND AND NOT PLATFORM_VITA) # vita minizip not built with "zip.h" support
++    list(APPEND CROSS2DUI_INCLUDE ${MINIZIP_INCLUDE_DIRS})
++    list(APPEND LDFLAGS ${MINIZIP_LIBRARIES})
++else ()
++    message(WARNING "minizip not found, using embedded one...")
+     list(APPEND CROSS2DUI_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/external)
+     list(APPEND CROSS2DUI_SOURCE
+             ${CMAKE_CURRENT_SOURCE_DIR}/external/minizip/ioapi.c
++            ${CMAKE_CURRENT_SOURCE_DIR}/external/minizip/zip.c
+             ${CMAKE_CURRENT_SOURCE_DIR}/external/minizip/unzip.c)
+     list(APPEND FLAGS -DIOAPI_NO_64 -DUSE_FILE32API)
+-else ()
+-    list(APPEND LDFLAGS minizip)
+ endif ()
+ 
+ if (PLATFORM_LINUX OR PLATFORM_WINDOWS)
+diff --git a/ui/external/minizip/crypt.h b/src/skeleton/external/minizip/crypt.h
+similarity index 100%
+rename from ui/external/minizip/crypt.h
+rename to src/skeleton/external/minizip/crypt.h
+diff --git a/ui/external/minizip/ioapi.c b/src/skeleton/external/minizip/ioapi.c
+similarity index 100%
+rename from ui/external/minizip/ioapi.c
+rename to src/skeleton/external/minizip/ioapi.c
+diff --git a/ui/external/minizip/ioapi.h b/src/skeleton/external/minizip/ioapi.h
+similarity index 100%
+rename from ui/external/minizip/ioapi.h
+rename to src/skeleton/external/minizip/ioapi.h
+diff --git a/ui/external/minizip/iowin32.c b/src/skeleton/external/minizip/iowin32.c
+similarity index 100%
+rename from ui/external/minizip/iowin32.c
+rename to src/skeleton/external/minizip/iowin32.c
+diff --git a/ui/external/minizip/iowin32.h b/src/skeleton/external/minizip/iowin32.h
+similarity index 100%
+rename from ui/external/minizip/iowin32.h
+rename to src/skeleton/external/minizip/iowin32.h
+diff --git a/ui/external/minizip/miniunz.c b/src/skeleton/external/minizip/miniunz.c
+similarity index 100%
+rename from ui/external/minizip/miniunz.c
+rename to src/skeleton/external/minizip/miniunz.c
+diff --git a/ui/external/minizip/minizip.c b/src/skeleton/external/minizip/minizip.c
+similarity index 100%
+rename from ui/external/minizip/minizip.c
+rename to src/skeleton/external/minizip/minizip.c
+diff --git a/ui/external/minizip/mztools.c b/src/skeleton/external/minizip/mztools.c
+similarity index 100%
+rename from ui/external/minizip/mztools.c
+rename to src/skeleton/external/minizip/mztools.c
+diff --git a/ui/external/minizip/mztools.h b/src/skeleton/external/minizip/mztools.h
+similarity index 100%
+rename from ui/external/minizip/mztools.h
+rename to src/skeleton/external/minizip/mztools.h
+diff --git a/ui/external/minizip/unzip.c b/src/skeleton/external/minizip/unzip.c
+similarity index 100%
+rename from ui/external/minizip/unzip.c
+rename to src/skeleton/external/minizip/unzip.c
+diff --git a/ui/external/minizip/unzip.h b/src/skeleton/external/minizip/unzip.h
+similarity index 100%
+rename from ui/external/minizip/unzip.h
+rename to src/skeleton/external/minizip/unzip.h
+diff --git a/ui/external/minizip/zip.c b/src/skeleton/external/minizip/zip.c
+similarity index 100%
+rename from ui/external/minizip/zip.c
+rename to src/skeleton/external/minizip/zip.c
+diff --git a/ui/external/minizip/zip.h b/src/skeleton/external/minizip/zip.h
+similarity index 100%
+rename from ui/external/minizip/zip.h
+rename to src/skeleton/external/minizip/zip.h
+diff --git a/ui/mpv.cpp b/src/skeleton/mpv.cpp
+similarity index 83%
+rename from ui/mpv.cpp
+rename to src/skeleton/mpv.cpp
+index 3bc54ab..c96242e 100644
+--- a/ui/mpv.cpp
++++ b/src/skeleton/mpv.cpp
+@@ -37,6 +37,12 @@ Mpv::Mpv(const std::string &configPath, bool initRender) {
+     mpv_set_option_string(handle, "audio-channels", "stereo");
+     mpv_set_option_string(handle, "video-sync", "audio");
+ 
++    // misc options
++    mpv_set_option_string(handle, "load-stats-overlay", "no");
++    mpv_set_option_string(handle, "video-osd", "no");
++    mpv_set_option_string(handle, "osc", "no");
++    mpv_set_option_string(handle, "load-scripts", "no");
++
+     if (!initRender) {
+         mpv_set_option_string(handle, "vid", "no");
+         mpv_set_option_string(handle, "aid", "no");
+@@ -44,6 +50,12 @@ Mpv::Mpv(const std::string &configPath, bool initRender) {
+         mpv_set_option_string(handle, "vo", "null");
+         mpv_set_option_string(handle, "ao", "null");
+     }
++#if MPV_CLIENT_API_VERSION >= 131075 // >= v0.38.0
++    else {
++        mpv_set_option_string(handle, "vo", "libmpv");
++        mpv_set_option_string(handle, "ao", "hos");
++    }
++#endif
+ 
+     int res = mpv_initialize(handle);
+     if (res != 0) {
+@@ -56,9 +68,9 @@ Mpv::Mpv(const std::string &configPath, bool initRender) {
+     if (initRender) {
+         mpv_opengl_init_params gl_init_params{get_proc_address_mpv};
+         mpv_render_param params[]{
+-                {MPV_RENDER_PARAM_API_TYPE,           (void *) MPV_RENDER_API_TYPE_OPENGL},
+-                {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl_init_params},
+-                {MPV_RENDER_PARAM_INVALID,            nullptr}
++            {MPV_RENDER_PARAM_API_TYPE, (void *) MPV_RENDER_API_TYPE_OPENGL},
++            {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl_init_params},
++            {MPV_RENDER_PARAM_INVALID, nullptr}
+         };
+ 
+         if (mpv_render_context_create(&context, handle, params) < 0) {
+@@ -70,10 +82,13 @@ Mpv::Mpv(const std::string &configPath, bool initRender) {
+ }
+ 
+ Mpv::~Mpv() {
++    printf("Mpv::~Mpv()\n");
+     if (context != nullptr) {
++        printf("Mpv::~Mpv: mpv_render_context_free(%p)\n", context);
+         mpv_render_context_free(context);
+     }
+     if (handle != nullptr) {
++        printf("Mpv::~Mpv: mpv_terminate_destroy(%p)\n", handle);
+         mpv_terminate_destroy(handle);
+     }
+ }
+@@ -86,7 +101,11 @@ int Mpv::load(const std::string &file, LoadType loadType, const std::string &opt
+         } else if (loadType == LoadType::AppendPlay) {
+             type = "append-play";
+         }
++#if MPV_CLIENT_API_VERSION >= 131075 // >= v0.38.0
++        const char *cmd[] = {"loadfile", file.c_str(), type.c_str(), "-1", options.c_str(), nullptr};
++#else
+         const char *cmd[] = {"loadfile", file.c_str(), type.c_str(), options.c_str(), nullptr};
++#endif
+         return mpv_command(handle, cmd);
+     }
+ 
+@@ -168,7 +187,7 @@ long Mpv::getPosition() {
+ }
+ 
+ bool Mpv::isAvailable() {
+-    return handle != nullptr;
++    return handle != nullptr && context != nullptr;
+ }
+ 
+ bool Mpv::isStopped() {
+diff --git a/ui/mpv.h b/src/skeleton/mpv.h
+similarity index 100%
+rename from ui/mpv.h
+rename to src/skeleton/mpv.h
+diff --git a/ui/mpv_texture.cpp b/src/skeleton/mpv_texture.cpp
+similarity index 100%
+rename from ui/mpv_texture.cpp
+rename to src/skeleton/mpv_texture.cpp
+diff --git a/ui/mpv_texture.h b/src/skeleton/mpv_texture.h
+similarity index 100%
+rename from ui/mpv_texture.h
+rename to src/skeleton/mpv_texture.h
+diff --git a/src/skeleton/pemu.h b/src/skeleton/pemu.h
+new file mode 100644
+index 0000000..90bea3d
+--- /dev/null
++++ b/src/skeleton/pemu.h
+@@ -0,0 +1,42 @@
++//
++// Created by cpasjuste on 28/05/18.
++//
++
++#ifndef PEMU_H
++#define PEMU_H
++
++#include "ss_api.h"
++#include "cross2d/c2d.h"
++
++#ifdef __MPV__
++
++#include "mpv.h"
++#include "mpv_texture.h"
++
++#endif
++
++#include "romlist.h"
++#include "skin.h"
++#include "ui_video.h"
++#include "pemu_config.h"
++
++#include "skin/SkinnedRectangle.h"
++#include "skin/SkinnedText.h"
++
++#include "ui_listbox.h"
++#include "ui_highlight.h"
++#include "ui_menu.h"
++#include "ui_emu.h"
++#include "ui_romlist.h"
++#include "ui_romlist_rominfo.h"
++#include "ui_progressbox.h"
++#include "ui_menu_state.h"
++#include "ui_status_box.h"
++#include "ui_main.h"
++#include "ui_help.h"
++
++using namespace c2d;
++using namespace pemu;
++using namespace ss_api;
++
++#endif //PEMU_H
+diff --git a/src/skeleton/pemu_config.cpp b/src/skeleton/pemu_config.cpp
+new file mode 100644
+index 0000000..15af6ab
+--- /dev/null
++++ b/src/skeleton/pemu_config.cpp
+@@ -0,0 +1,348 @@
++//
++// Created by cpasjuste on 13/09/23.
++//
++
++#include "pemu.h"
++#include "pemu_config.h"
++
++using namespace c2d::config;
++using namespace ss_api;
++
++PEMUConfig::PEMUConfig(Renderer *renderer, const std::string &name, int version)
++    : Config(name, renderer->getIo()->getDataPath() + "config.cfg", version) {
++    p_renderer = renderer;
++
++    /*
++     * ROMS PATHS
++     */
++    Group roms("ROMS", CFG_ID_ROMS);
++    addGroup(roms);
++
++    /// UI_FILTERING
++    Group ui_filtering("UI_FILTERING", UI_FILTERING);
++    ui_filtering.addOption({"FILTER_FAVORITES", {"OFF", "ON"}, 0, UI_FILTER_FAVORITES});
++    ui_filtering.addOption({"FILTER_MISSING", {"OFF", "ON"}, 1, UI_FILTER_AVAILABLE});
++    ui_filtering.addOption({"FILTER_CLONES", {"OFF", "ON"}, 1, UI_FILTER_CLONES})->setFlags(HIDDEN);
++    ui_filtering.addOption({"FILTER_SYSTEM", {"ALL"}, 0, UI_FILTER_SYSTEM})->setFlags(HIDDEN);
++    ui_filtering.addOption({"FILTER_GENRE", {"ALL"}, 0, UI_FILTER_GENRE});
++    ui_filtering.addOption({"FILTER_DATE", {"ALL"}, 0, UI_FILTER_DATE});
++    ui_filtering.addOption({"FILTER_EDITOR", {"ALL"}, 0, UI_FILTER_EDITOR});
++    ui_filtering.addOption({"FILTER_DEVELOPER", {"ALL"}, 0, UI_FILTER_DEVELOPER});
++    ui_filtering.addOption({"FILTER_PLAYERS", {"ALL"}, 0, UI_FILTER_PLAYERS});
++    ui_filtering.addOption({"FILTER_RATING", {"ALL"}, 0, UI_FILTER_RATING});
++    addGroup(ui_filtering);
++
++    /// UI_OPTIONS
++    Group main("UI_OPTIONS", UI_OPTIONS);
++    main.addOption({"SHOW_ZIP_NAMES", {"OFF", "ON"}, 1, UI_SHOW_ZIP_NAMES});
++#ifdef __FULLSCREEN__
++    main.addOption({"FULLSCREEN", {"OFF", "ON"}, 1, UI_FULLSCREEN, PEMU_CONFIG_RESTART_NEEDED});
++#endif
++    Vector2i displaySize = C2DDevice::getDisplaySize();
++    int aspect_index = (float) displaySize.x / (float) displaySize.y > 1.33f ? 0 : 1;
++    main.addOption({
++        "SKIN_ASPECT", {"16/9", "4/3"}, aspect_index,
++        UI_SKIN_ASPECT, PEMU_CONFIG_RESTART_NEEDED
++    });
++    main.addOption({
++        "FONT_SCALING", {"0", "1", "2", "3", "4", "5"}, 0,
++        UI_FONT_SCALING, PEMU_CONFIG_RESTART_NEEDED
++    });
++    main.addOption({"VIDEO_SNAP_DELAY", {"3", "5", "7", "10"}, 1, UI_VIDEO_SNAP_DELAY});
++
++    // build  skin list
++    std::vector<std::string> skins;
++    // add default skins from romfs
++    skins.emplace_back("default");
++    // add skins from romfs dir
++    auto files = p_renderer->getIo()->getDirList(p_renderer->getIo()->getRomFsPath() + "skins/", true);
++    for (auto &file: files) {
++        if (file.type != c2d::Io::Type::Directory || file.name[0] == '.') {
++            continue;
++        }
++        // only append skin name if not found yet
++        if (std::find(skins.begin(), skins.end(), file.name) == skins.end()) {
++            skins.emplace_back(file.name);
++            printf("skin found: %s\n", file.path.c_str());
++        }
++    }
++    // add skins from data dir
++    files = p_renderer->getIo()->getDirList(p_renderer->getIo()->getDataPath() + "skins/", true);
++    for (auto &file: files) {
++        if (file.type != c2d::Io::Type::Directory || file.name[0] == '.') {
++            continue;
++        }
++        // only append skin name if not found yet
++        if (std::find(skins.begin(), skins.end(), file.name) == skins.end()) {
++            skins.emplace_back(file.name);
++            printf("skin found: %s\n", file.path.c_str());
++        }
++    }
++    // set "default" skin index
++    int index = 0;
++    for (size_t i = 0; i < skins.size(); i++) {
++        if (skins.at(i) == "default") {
++            index = (int) i;
++        }
++    }
++    main.addOption({"SKIN", skins, index, UI_SKIN});
++    addGroup(main);
++
++    /*
++     * Emulators options
++     */
++    Group emu_grp("EMULATION", EMULATION);
++    if (displaySize.y > 1080) {
++        emu_grp.addOption(
++            {
++                "SCALING", {"NONE", "2X", "3X", "4X", "5X", "6X", "7X", "8X", "9X", "FIT", "FULL"}, 9,
++                EMU_SCALING
++            });
++    } else if (displaySize.y > 720) {
++        emu_grp.addOption({"SCALING", {"NONE", "2X", "3X", "4X", "FIT", "FULL"}, 4, EMU_SCALING});
++    } else if (displaySize.y > 544) {
++        emu_grp.addOption({"SCALING", {"NONE", "2X", "3X", "FIT", "FULL"}, 3, EMU_SCALING});
++    } else if (displaySize.y > 240) {
++        emu_grp.addOption({"SCALING", {"NONE", "2X", "FIT", "FULL"}, 2, EMU_SCALING});
++    } else {
++        emu_grp.addOption({"SCALING", {"NONE", "FIT", "FULL"}, 1, EMU_SCALING});
++    }
++
++    emu_grp.addOption({"SCALING_MODE", {"AUTO", "ASPECT", "INTEGER"}, 1, EMU_SCALING_MODE});
++    emu_grp.addOption({"FILTER", {std::string("POINT"), std::string("LINEAR")}, 1, EMU_FILTER});
++    if (const auto shaderList = p_renderer->getShaderList()) {
++        emu_grp.addOption({"EFFECT", shaderList->getNames(), 0, EMU_SHADER});
++    } else {
++        emu_grp.addOption({"EFFECT", {"c2d-texture"}, 0, EMU_SHADER})->setFlags(HIDDEN);
++    }
++#ifdef __VITA__
++    emu_grp.addOption({"WAIT_RENDERING", {"OFF", "ON"}, 1, EMU_WAIT_RENDERING});
++#endif
++    emu_grp.addOption({"SHOW_FPS", {"OFF", "ON"}, 0, EMU_SHOW_FPS});
++    addGroup(emu_grp);
++
++    /*
++     * Inputs options
++     */
++    Group joy_grp("GAMEPAD", GAMEPAD);
++    joy_grp.addOption({"JOY_UP", KEY_JOY_UP_DEFAULT, JOY_UP})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_DOWN", KEY_JOY_DOWN_DEFAULT, JOY_DOWN})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_LEFT", KEY_JOY_LEFT_DEFAULT, JOY_LEFT})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_RIGHT", KEY_JOY_RIGHT_DEFAULT, JOY_RIGHT})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_A", KEY_JOY_A_DEFAULT, JOY_A})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_B", KEY_JOY_B_DEFAULT, JOY_B})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_X", KEY_JOY_X_DEFAULT, JOY_X})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_Y", KEY_JOY_Y_DEFAULT, JOY_Y})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_LT", KEY_JOY_LT_DEFAULT, JOY_LT})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_RT", KEY_JOY_RT_DEFAULT, JOY_RT})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_LB", KEY_JOY_LB_DEFAULT, JOY_LB})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_RB", KEY_JOY_RB_DEFAULT, JOY_RB})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_SELECT", KEY_JOY_SELECT_DEFAULT, JOY_SELECT})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_START", KEY_JOY_START_DEFAULT, JOY_START})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_MENU1", KEY_JOY_MENU1_DEFAULT, JOY_MENU1})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_MENU2", KEY_JOY_MENU2_DEFAULT, JOY_MENU2})->setFlags(INPUT);
++    joy_grp.addOption({"JOY_AXIS_LX", KEY_JOY_AXIS_LX, JOY_AXIS_LX})->setFlags(INPUT | HIDDEN);
++    joy_grp.addOption({"JOY_AXIS_LY", KEY_JOY_AXIS_LY, JOY_AXIS_LY})->setFlags(INPUT | HIDDEN);
++    joy_grp.addOption({"JOY_AXIS_RX", KEY_JOY_AXIS_RX, JOY_AXIS_RX})->setFlags(INPUT | HIDDEN);
++    joy_grp.addOption({"JOY_AXIS_RY", KEY_JOY_AXIS_RY, JOY_AXIS_RY})->setFlags(INPUT | HIDDEN);
++    joy_grp.addOption({
++        "JOY_DEADZONE", {
++            "2000", "4000", "6000", "8000", "10000", "12000", "14000", "16000",
++            "18000", "20000", "22000", "24000", "26000", "28000", "30000"
++        },
++        3, JOY_DEADZONE
++    });
++    addGroup(joy_grp);
++#ifndef NO_KEYBOARD
++    Group kb_grp("KEYBOARD", KEYBOARD);
++    kb_grp.addOption({"KEY_UP", KEY_KB_UP_DEFAULT, KEY_UP})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_DOWN", KEY_KB_DOWN_DEFAULT, KEY_DOWN})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_LEFT", KEY_KB_LEFT_DEFAULT, KEY_LEFT})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_RIGHT", KEY_KB_RIGHT_DEFAULT, KEY_RIGHT})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_A", KEY_KB_A_DEFAULT, KEY_A})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_B", KEY_KB_B_DEFAULT, KEY_B})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_X", KEY_KB_X_DEFAULT, KEY_X})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_Y", KEY_KB_Y_DEFAULT, KEY_Y})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_LT", KEY_KB_LT_DEFAULT, KEY_LT})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_RT", KEY_KB_RT_DEFAULT, KEY_RT})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_LB", KEY_KB_LB_DEFAULT, KEY_LB})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_RB", KEY_KB_RB_DEFAULT, KEY_RB})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_SELECT", KEY_KB_SELECT_DEFAULT, KEY_SELECT})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_START", KEY_KB_START_DEFAULT, KEY_START})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_MENU1", KEY_KB_MENU1_DEFAULT, KEY_MENU1})->setFlags(INPUT);
++    kb_grp.addOption({"KEY_MENU2", KEY_KB_MENU2_DEFAULT, KEY_MENU2})->setFlags(INPUT);
++    addGroup(kb_grp);
++#endif
++}
++
++bool PEMUConfig::loadGame(const Game &game) {
++    Group group;
++
++    // free game config if needed
++    delete (p_game_config);
++
++    // create game configuration
++    std::string path = p_renderer->getIo()->getDataPath() + "configs/" + Utility::removeExt(game.path) + ".cfg";
++    p_game_config = new Config(getName() + "_GAME", path, getAppVersion());
++
++    // copy game emulation config section from main config for default options
++    getGroup(EMULATION)->copy(&group);
++    p_game_config->addGroup(group);
++
++    // copy game gamepad config from main config for default options
++    getGroup(GAMEPAD)->copy(&group);
++    p_game_config->addGroup(group);
++
++#ifndef NO_KEYBOARD
++    // copy game keyboard config from main config for default options
++    getGroup(KEYBOARD)->copy(&group);
++    p_game_config->addGroup(group);
++#endif
++
++    p_game_config->load();
++
++    return true;
++}
++
++bool PEMUConfig::saveGame() {
++    if (!p_game_config) return false;
++    return p_game_config->save();
++}
++
++bool PEMUConfig::addRomPath(const std::string &name, const std::string &path, const ss_api::System &system) {
++    printf("PEMUConfig::addRomPath: %s (system: %s, path: %s)\n",
++           name.c_str(), system.name.c_str(), path.c_str());
++    auto roms = config_lookup(libConfigGetInstance(), std::string(getName() + ".ROMS").c_str());
++    if (roms && config_setting_get_member(roms, name.c_str())) {
++        printf("PEMUConfig::addRomPath: %s found in config file, skipping\n", name.c_str());
++        return false;
++    }
++
++    auto setting = config_setting_add(roms, name.c_str(), CONFIG_TYPE_LIST);
++    if (setting) {
++        // add system name
++        auto opt = config_setting_add(setting, "SYSTEM_NAME", CONFIG_TYPE_STRING);
++        config_setting_set_string(opt, system.name.c_str());
++        // add system id
++        char sys[32];
++        snprintf(sys, 31, "0x%08x", system.id);
++        opt = config_setting_add(setting, "SYSTEM_ID", CONFIG_TYPE_STRING);
++        config_setting_set_string(opt, sys);
++        // add roms path
++        opt = config_setting_add(setting, "PATH", CONFIG_TYPE_STRING);
++        config_setting_set_string(opt, path.c_str());
++        return true;
++    }
++
++    return false;
++}
++
++std::vector<PEMUConfig::RomPath> PEMUConfig::getRomPaths() {
++    std::vector<RomPath> romPaths;
++    auto roms = config_lookup(libConfigGetInstance(), std::string(getName() + ".ROMS").c_str());
++    if (!roms) {
++        printf("PEMUConfig::getRomPaths: config_lookup failed\n");
++        return romPaths;
++    }
++
++    int count = config_setting_length(roms);
++    for (int i = 0; i < count; ++i) {
++        auto setting = config_setting_get_elem(roms, i);
++        auto sysName = config_setting_get_elem(setting, 0);
++        auto sysId = config_setting_get_elem(setting, 1);
++        auto path = config_setting_get_elem(setting, 2);
++        if (sysName && sysId && path) {
++            std::string p = config_setting_get_string(path);
++            if (!Utility::endsWith(p, "/")) p += "/";
++            const char *s = config_setting_get_string(sysId);
++            if (s) {
++                auto id = Utility::parseHex(s);
++                romPaths.push_back({p, {(int) id, 0, config_setting_get_string(sysName)}});
++            }
++        }
++    }
++
++    return romPaths;
++}
++
++Option *PEMUConfig::getOption(int id, bool isGame) {
++    if (isGame && p_game_config) {
++        return p_game_config->getOption(id);
++    }
++
++    return Config::getOption(id);
++}
++
++Option *PEMUConfig::get(int id, bool isGame) {
++    return getOption(id, isGame);
++}
++
++std::vector<Input::ButtonMapping> PEMUConfig::getKeyboardMapping(int player, bool isGame) {
++#ifndef NO_KEYBOARD
++    return {
++        {Input::Button::Up, getOption(KEY_UP, isGame)->getInteger()},
++        {Input::Button::Down, getOption(KEY_DOWN, isGame)->getInteger()},
++        {Input::Button::Left, getOption(KEY_LEFT, isGame)->getInteger()},
++        {Input::Button::Right, getOption(KEY_RIGHT, isGame)->getInteger()},
++        {Input::Button::Select, getOption(KEY_SELECT, isGame)->getInteger()},
++        {Input::Button::Start, getOption(KEY_START, isGame)->getInteger()},
++        {Input::Button::A, getOption(KEY_A, isGame)->getInteger()},
++        {Input::Button::B, getOption(KEY_B, isGame)->getInteger()},
++        {Input::Button::X, getOption(KEY_X, isGame)->getInteger()},
++        {Input::Button::Y, getOption(KEY_Y, isGame)->getInteger()},
++        {Input::Button::LT, getOption(KEY_LT, isGame)->getInteger()},
++        {Input::Button::RT, getOption(KEY_RT, isGame)->getInteger()},
++        {Input::Button::LB, getOption(KEY_LB, isGame)->getInteger()},
++        {Input::Button::RB, getOption(KEY_RB, isGame)->getInteger()},
++        {Input::Button::Menu1, getOption(KEY_MENU1, isGame)->getInteger()},
++        {Input::Button::Menu2, getOption(KEY_MENU2, isGame)->getInteger()}
++    };
++#else
++    return {};
++#endif
++}
++
++std::vector<Input::ButtonMapping> PEMUConfig::getJoystickMapping(int player, bool isGame) {
++    // TODO: allow per player config
++    return {
++        {Input::Button::Up, getOption(JOY_UP, isGame)->getInteger()},
++        {Input::Button::Down, getOption(JOY_DOWN, isGame)->getInteger()},
++        {Input::Button::Left, getOption(JOY_LEFT, isGame)->getInteger()},
++        {Input::Button::Right, getOption(JOY_RIGHT, isGame)->getInteger()},
++        {Input::Button::Select, getOption(JOY_SELECT, isGame)->getInteger()},
++        {Input::Button::Start, getOption(JOY_START, isGame)->getInteger()},
++        {Input::Button::A, getOption(JOY_A, isGame)->getInteger()},
++        {Input::Button::B, getOption(JOY_B, isGame)->getInteger()},
++        {Input::Button::X, getOption(JOY_X, isGame)->getInteger()},
++        {Input::Button::Y, getOption(JOY_Y, isGame)->getInteger()},
++        {Input::Button::LT, getOption(JOY_LT, isGame)->getInteger()},
++        {Input::Button::RT, getOption(JOY_RT, isGame)->getInteger()},
++        {Input::Button::LB, getOption(JOY_LB, isGame)->getInteger()},
++        {Input::Button::RB, getOption(JOY_RB, isGame)->getInteger()},
++        {Input::Button::Menu1, getOption(JOY_MENU1, isGame)->getInteger()},
++        {Input::Button::Menu2, getOption(JOY_MENU2, isGame)->getInteger()}
++    };
++}
++
++Vector2i PEMUConfig::getJoystickAxisLeftMapping(int player, bool isGame) {
++    return {
++        getOption(JOY_AXIS_LX, isGame)->getInteger(),
++        getOption(JOY_AXIS_LY, isGame)->getInteger()
++    };
++}
++
++Vector2i PEMUConfig::getJoystickAxisRightMapping(int player, bool isGame) {
++    return {
++        getOption(JOY_AXIS_RX, isGame)->getInteger(),
++        getOption(JOY_AXIS_RY, isGame)->getInteger()
++    };
++}
++
++int PEMUConfig::getJoystickDeadZone(int player, bool isGame) {
++    return getOption(JOY_DEADZONE, isGame)->getInteger();
++}
++
++PEMUConfig::~PEMUConfig() {
++    printf("PEMUConfig::~PEMUConfig()\n");
++    delete (p_game_config);
++}
+diff --git a/src/skeleton/pemu_config.h b/src/skeleton/pemu_config.h
+new file mode 100644
+index 0000000..f2f32b9
+--- /dev/null
++++ b/src/skeleton/pemu_config.h
+@@ -0,0 +1,154 @@
++//
++// Created by cpasjuste on 13/09/23.
++//
++
++#ifndef PEMU_CONFIG_H
++#define PEMU_CONFIG_H
++
++#define PEMU_CONFIG_RESTART_NEEDED "YOU NEED TO RESTART THE APPLICATION AFTER CHANGING THIS OPTION"
++
++namespace pemu {
++    class PEMUConfig : public c2d::config::Config {
++    public:
++        enum Flags {
++            INPUT = BIT(1),
++            HIDDEN = BIT(2)
++        };
++
++        enum GrpId {
++            UI_FILTERING = 0,
++            UI_OPTIONS,
++            EMULATION,
++            GAMEPAD,
++            KEYBOARD
++        };
++
++        enum OptId {
++            UI_SHOW_ZIP_NAMES = 0,
++            UI_FULLSCREEN,
++            UI_SKIN,
++            UI_SKIN_ASPECT,
++            UI_FONT_SCALING,
++            UI_VIDEO_SNAP_DELAY,
++            UI_FILTER_FAVORITES,
++            UI_FILTER_AVAILABLE,
++            UI_FILTER_CLONES,
++            UI_FILTER_SYSTEM,
++            UI_FILTER_EDITOR,
++            UI_FILTER_DEVELOPER,
++            UI_FILTER_PLAYERS,
++            UI_FILTER_RATING,
++            UI_FILTER_DATE,
++            UI_FILTER_GENRE,
++            EMU_SCALING,
++            EMU_SCALING_MODE,
++            EMU_FILTER,
++            EMU_SHADER,
++#ifdef __VITA__
++            EMU_WAIT_RENDERING,
++#endif
++            EMU_FORCE_60HZ,
++            EMU_AUDIO_SYNC,
++            EMU_AUDIO_FREQ,
++            EMU_AUDIO_INTERPOLATION,
++            EMU_AUDIO_FMINTERPOLATION,
++            EMU_ROTATION,
++            EMU_SHOW_FPS,
++            EMU_FRAMESKIP,
++            EMU_NEOBIOS,
++            EMU_PSNES_CHEATS,
++            EMU_PSNES_BLOCK_VRAM,
++            EMU_PSNES_TRANSPARENCY,
++            EMU_PSNES_DISPLAY_MESSAGES,
++            EMU_PSNES_FRAMESKIP,
++            EMU_PSNES_TURBO_MODE,
++            EMU_PSNES_TURBO_FRAMESKIP,
++            JOY_UP,
++            JOY_DOWN,
++            JOY_LEFT,
++            JOY_RIGHT,
++            JOY_A,
++            JOY_B,
++            JOY_X,
++            JOY_Y,
++            JOY_LT,
++            JOY_RT,
++            JOY_LB,
++            JOY_RB,
++            JOY_SELECT,
++            JOY_START,
++            JOY_MENU1,
++            JOY_MENU2,
++            JOY_AXIS_LX,
++            JOY_AXIS_LY,
++            JOY_AXIS_RX,
++            JOY_AXIS_RY,
++            JOY_DEADZONE,
++#ifndef NO_KEYBOARD
++            KEY_UP,
++            KEY_DOWN,
++            KEY_LEFT,
++            KEY_RIGHT,
++            KEY_A,
++            KEY_B,
++            KEY_X,
++            KEY_Y,
++            KEY_LT,
++            KEY_RT,
++            KEY_LB,
++            KEY_RB,
++            KEY_SELECT,
++            KEY_START,
++            KEY_MENU1,
++            KEY_MENU2,
++#endif
++            END
++        };
++
++        struct RomPath {
++            std::string path;
++            ss_api::System system;
++        };
++
++        PEMUConfig(c2d::Renderer *renderer, const std::string &name, int version = 1);
++
++        ~PEMUConfig() override;
++
++        bool loadGame(const ss_api::Game &game);
++
++        bool saveGame();
++
++        c2d::config::Option *get(int id, bool isGame = false);
++
++        c2d::config::Option *getOption(int id, bool isGame = false);
++
++        bool addRomPath(const std::string &name, const std::string &path, const ss_api::System &system);
++
++        std::vector<RomPath> getRomPaths();
++
++        std::vector<c2d::Input::ButtonMapping> getKeyboardMapping(int player, bool isGame = false);
++
++        std::vector<c2d::Input::ButtonMapping> getJoystickMapping(int player, bool isGame = false);
++
++        c2d::Vector2i getJoystickAxisLeftMapping(int player, bool isGame = false);
++
++        c2d::Vector2i getJoystickAxisRightMapping(int player, bool isGame = false);
++
++        int getJoystickDeadZone(int player, bool isGame = false);
++
++        // custom cores overrides
++        virtual std::string getCoreVersion() { return "UNKNOWN"; }
++
++        virtual std::vector<std::string> getCoreSupportedExt() { return {".zip"}; }
++
++        virtual std::vector<int> getCoreHiddenOptionToEnable() { return {}; }
++
++    private:
++        Config *p_game_config = nullptr;
++        c2d::Renderer *p_renderer = nullptr;
++    };
++}
++
++#define CFG_ID_ROMS (PEMUConfig::OptId::END + 1)
++
++#endif //PEMU_CONFIG_H
+diff --git a/src/skeleton/romlist.cpp b/src/skeleton/romlist.cpp
+new file mode 100644
+index 0000000..6d75adc
+--- /dev/null
++++ b/src/skeleton/romlist.cpp
+@@ -0,0 +1,162 @@
++//
++// Created by cpasjuste on 19/10/16.
++//
++
++#include <vector>
++#include <string>
++#include <algorithm>
++#include "pemu.h"
++
++RomList::RomList(UiMain *_ui, const std::string &emuVersion, const std::vector<std::string> &_filters) {
++    printf("RomList()\n");
++    ui = _ui;
++    filters = _filters;
++
++    // UI
++    rect = new C2DRectangle(
++            Vector2f(ui->getSize().x - 8, ui->getSize().y - 8));
++    ui->getSkin()->loadRectangleShape(rect, {"MAIN"});
++
++    auto *title = new RectangleShape({16, 16});
++    if (ui->getSkin()->loadRectangleShape(title, {"MAIN", "TITLE"})) {
++        title->setOrigin(Origin::Center);
++        title->setPosition(Vector2f(rect->getSize().x / 2, rect->getSize().y / 2));
++        float scaling = std::min(
++                (rect->getSize().x * 0.8f) / title->getSize().x,
++                (rect->getSize().y * 0.8f) / title->getSize().y);
++        title->setScale(scaling, scaling);
++        rect->add(title);
++    } else {
++        delete (title);
++    }
++
++    text = new Text();
++    ui->getSkin()->loadText(text, {"ROM_LIST", "TEXT"});
++    text->setOrigin(Origin::BottomLeft);
++    text->setPosition(8, rect->getSize().y - 8);
++    rect->add(text);
++
++    auto *version = new Text();
++    ui->getSkin()->loadText(version, {"ROM_LIST", "TEXT"});
++    version->setOrigin(Origin::BottomRight);
++    version->setPosition(rect->getSize().x - 8, rect->getSize().y - 8);
++    version->setString(emuVersion);
++    rect->add(version);
++
++    ui->add(rect);
++    //ui->flip();
++    // UI
++
++    gameList = new GameList();
++    gameListFav = new GameList();
++}
++
++void RomList::build(const ss_api::GameList::GameAddedCb &cb) {
++    float time_start = ui->getElapsedTime().asSeconds();
++    auto cfg = ui->getConfig();
++    p_cb = cb;
++    m_games_count = m_games_available_count = 0;
++
++    ui->flip();
++
++    auto romPaths = cfg->getRomPaths();
++    for (const auto &p: romPaths) {
++        std::string gameListPath = p.path + "gamelist.xml";
++        gameList->append(gameListPath, p.path, false, filters, p.system, false, [this](Game *game) {
++            if (p_cb) p_cb(game);
++            m_games_count++;
++            if (game->available) m_games_available_count++;
++            if (!(m_games_count % 200)) {
++                setLoadingText("Games: %li / %li", m_games_available_count, m_games_count);
++            }
++        });
++        setLoadingText("Games: %li / %li", m_games_available_count, m_games_count);
++        printf("RomList::build: %s, games found: %zu / %zu (system: %s (0x%08x))\n",
++               gameListPath.c_str(), gameList->getAvailableCount(),
++               gameList->games.size(), p.system.name.c_str(), p.system.id);
++    }
++
++    // sort games
++    printf("RomList::build: sorting games...\n");
++    std::sort(gameList->systemList.systems.begin(), gameList->systemList.systems.end(), Api::sortSystemByName);
++    std::sort(gameList->editors.begin(), gameList->editors.end(), Api::sortEditorByName);
++    std::sort(gameList->developers.begin(), gameList->developers.end(), Api::sortDeveloperByName);
++    std::sort(gameList->genres.begin(), gameList->genres.end(), Api::sortGenreByName);
++    std::sort(gameList->players.begin(), gameList->players.end(), Api::sortInteger);
++    std::sort(gameList->ratings.begin(), gameList->ratings.end(), Api::sortInteger);
++    std::sort(gameList->rotations.begin(), gameList->rotations.end(), Api::sortInteger);
++    std::sort(gameList->resolutions.begin(), gameList->resolutions.end(), Api::sortByName);
++    std::sort(gameList->dates.begin(), gameList->dates.end(), Api::sortByName);
++
++    // add filtering options
++    printf("RomList::build: add filtering options...\n");
++    auto grp = cfg->getGroup(PEMUConfig::GrpId::UI_FILTERING);
++    grp->getOption(PEMUConfig::OptId::UI_FILTER_SYSTEM)->setArray(gameList->systemList.getNames(), 0);
++    grp->getOption(PEMUConfig::OptId::UI_FILTER_GENRE)->setArray(gameList->getGenreNames(), 0);
++    grp->getOption(PEMUConfig::OptId::UI_FILTER_DATE)->setArray(gameList->getDates(), 0);
++    grp->getOption(PEMUConfig::OptId::UI_FILTER_EDITOR)->setArray(gameList->getEditorNames(), 0);
++    grp->getOption(PEMUConfig::OptId::UI_FILTER_DEVELOPER)->setArray(gameList->getDeveloperNames(), 0);
++    grp->getOption(PEMUConfig::OptId::UI_FILTER_PLAYERS)->setArray(gameList->getPlayersNames(), 0);
++    grp->getOption(PEMUConfig::OptId::UI_FILTER_RATING)->setArray(gameList->getRatingNames(), 0);
++
++    // custom core hide/show flags
++    auto ids = cfg->getCoreHiddenOptionToEnable();
++    for (const auto &id: ids) {
++        cfg->get(id)->setFlags(0);
++    }
++
++    // we need to reload config to update new options we just added
++    printf("RomList::build: reloading config...\n");
++    cfg->load();
++
++    printf("RomList::build(): list built in %f\n", ui->getElapsedTime().asSeconds() - time_start);
++
++    // remove ui widgets
++    delete (rect);
++}
++
++void RomList::initFav() {
++    // load favorites
++    delete (gameListFav);
++    gameListFav = new GameList();
++    gameListFav->append(ui->getIo()->getDataPath() + "favorites.xml");
++    for (auto &g: gameListFav->games) {
++        auto game = gameList->findGameByPathAndSystem(g.path, g.system.id);
++        if (!game.path.empty()) {
++            g.available = true;
++            g.romsPath = game.romsPath;
++        }
++    }
++
++    printf("RomList::initFav: %zu favorites\n", gameListFav->games.size());
++}
++
++void RomList::addFav(const Game &game) {
++    if (!gameListFav->exist(game.id)) {
++        gameListFav->games.emplace_back(game);
++        gameListFav->save(ui->getIo()->getDataPath() + "favorites.xml", "mixrbv2", "", "video");
++    }
++}
++
++void RomList::removeFav(const Game &game) {
++    if (gameListFav->remove(game.id)) {
++        gameListFav->save(ui->getIo()->getDataPath() + "favorites.xml", "mixrbv2", "", "video");
++    }
++}
++
++void RomList::setLoadingText(const char *format, ...) {
++    char buffer[512];
++    va_list arg;
++    va_start(arg, format);
++    vsnprintf(buffer, 512, format, arg);
++    va_end(arg);
++
++    text->setString(buffer);
++    ui->flip();
++}
++
++RomList::~RomList() {
++    printf("~RomList()\n");
++    delete (gameList);
++    delete (gameListFav);
++}
+diff --git a/ui/c2dui_romlist.h b/src/skeleton/romlist.h
+similarity index 73%
+rename from ui/c2dui_romlist.h
+rename to src/skeleton/romlist.h
+index 08647d6..8ad9fc0 100644
+--- a/ui/c2dui_romlist.h
++++ b/src/skeleton/romlist.h
+@@ -7,19 +7,18 @@
+ 
+ #include <vector>
+ 
+-namespace c2dui {
+-
++namespace pemu {
+     class UiMain;
+ 
+     class RomList {
+-
+     public:
+-
+         RomList(UiMain *ui, const std::string &emuVersion, const std::vector<std::string> &filters);
+ 
+         virtual ~RomList();
+ 
+-        virtual void build(bool addArcadeSystem = false, const ss_api::System &system = {});
++        virtual void build(const ss_api::GameList::GameAddedCb &cb = nullptr);
++
++        virtual void initFav();
+ 
+         void addFav(const ss_api::Game &game);
+ 
+@@ -32,12 +31,12 @@ namespace c2dui {
+         c2d::Text *text;
+         ss_api::GameList *gameList = nullptr;
+         ss_api::GameList *gameListFav = nullptr;
+-        std::vector<std::string> paths;
+-        char icon_path[1024];
+-        float time_start = 0;
++        ss_api::GameList::GameAddedCb p_cb = nullptr;
+ 
+     protected:
+         std::vector<std::string> filters;
++        size_t m_games_count = 0;
++        size_t m_games_available_count = 0;
+     };
+ }
+ 
+diff --git a/ui/c2dui_skin.cpp b/src/skeleton/skin.cpp
+similarity index 97%
+rename from ui/c2dui_skin.cpp
+rename to src/skeleton/skin.cpp
+index 42634f1..cbb171c 100644
+--- a/ui/c2dui_skin.cpp
++++ b/src/skeleton/skin.cpp
+@@ -2,17 +2,17 @@
+ // Created by cpasjuste on 23/11/16.
+ //
+ 
+-#include "c2dui.h"
+-#include "c2dui_skin.h"
++#include "pemu.h"
++#include "skin.h"
+ 
+ Skin::Skin(UiMain *u) {
+     pMain = u;
+ 
+     // setup skin paths (data path first then romfs path)
+     mSkinPath[0] = pMain->getIo()->getDataPath() + "skins/"
+-                   + pMain->getConfig()->get(Option::GUI_SKIN)->getValueString() + "/";
++                   + pMain->getConfig()->get(PEMUConfig::OptId::UI_SKIN)->getString() + "/";
+     mSkinPath[1] = pMain->getIo()->getRomFsPath() + "skins/" +
+-                   pMain->getConfig()->get(Option::GUI_SKIN)->getValueString() + "/";
++                   pMain->getConfig()->get(PEMUConfig::OptId::UI_SKIN)->getString() + "/";
+ 
+     // try to load skin from data directory first
+     if (pMain->getIo()->exist(mSkinPath[0] + "config.cfg")) {
+@@ -23,7 +23,7 @@ Skin::Skin(UiMain *u) {
+         printf("Skin: config loaded from romfs (%s)\n", (mSkinPath[1] + "config.cfg").c_str());
+     } else {
+         // restore defaults
+-        pMain->getConfig()->get(Option::GUI_SKIN)->setValueString("default");
++        pMain->getConfig()->get(PEMUConfig::OptId::UI_SKIN)->setString("default");
+         mSkinPath[0] = mSkinPath[1] = pMain->getIo()->getRomFsPath() + "skins/default/";
+         printf("Skin: config file not found, reverted to default skin (%s)\n",
+                (mSkinPath[0] + "config.cfg").c_str());
+@@ -31,7 +31,7 @@ Skin::Skin(UiMain *u) {
+     }
+ 
+     // get default font scaling
+-    mFontScaling = (float) pMain->getConfig()->get(Option::GUI_FONT_SCALING)->getValueInt(0);
++    mFontScaling = (float) pMain->getConfig()->get(PEMUConfig::OptId::UI_FONT_SCALING)->getInteger();
+     mFontScaling = mFontScaling > 0 ? 1 + (mFontScaling / 10) : 1;
+ 
+     // load buttons textures
+@@ -190,7 +190,7 @@ Skin::Skin(UiMain *u) {
+     }
+ 
+     // load 4/3 skin config override if needed
+-    if (pMain->getConfig()->get(Option::Id::GUI_SKIN_ASPECT)->getIndex() == 1) {
++    if (pMain->getConfig()->get(PEMUConfig::OptId::UI_SKIN_ASPECT)->getArrayIndex() == 1) {
+         for (const auto &path: mSkinPath) {
+             std::string cfgPath = path + "config.cfg.override.43";
+             if (pMain->getIo()->exist(cfgPath)) {
+diff --git a/ui/c2dui_skin.h b/src/skeleton/skin.h
+similarity index 99%
+rename from ui/c2dui_skin.h
+rename to src/skeleton/skin.h
+index 03eea3f..c077251 100644
+--- a/ui/c2dui_skin.h
++++ b/src/skeleton/skin.h
+@@ -8,7 +8,7 @@
+ #include <string>
+ #include <vector>
+ 
+-namespace c2dui {
++namespace pemu {
+ 
+     class Skin {
+ 
+diff --git a/ui/skin/SkinnedRectangle.cpp b/src/skeleton/skin/SkinnedRectangle.cpp
+similarity index 98%
+rename from ui/skin/SkinnedRectangle.cpp
+rename to src/skeleton/skin/SkinnedRectangle.cpp
+index 9b04a46..533ca2f 100644
+--- a/ui/skin/SkinnedRectangle.cpp
++++ b/src/skeleton/skin/SkinnedRectangle.cpp
+@@ -2,7 +2,7 @@
+ // Created by cpasjuste on 13/12/2021.
+ //
+ 
+-#include "c2dui.h"
++#include "skeleton/pemu.h"
+ 
+ SkinnedRectangle::SkinnedRectangle(UiMain *main, const std::vector<std::string> &cfgTree)
+         : RectangleShape({0, 0}) {
+diff --git a/ui/skin/SkinnedRectangle.h b/src/skeleton/skin/SkinnedRectangle.h
+similarity index 69%
+rename from ui/skin/SkinnedRectangle.h
+rename to src/skeleton/skin/SkinnedRectangle.h
+index e350bdf..8bae4ad 100644
+--- a/ui/skin/SkinnedRectangle.h
++++ b/src/skeleton/skin/SkinnedRectangle.h
+@@ -7,14 +7,14 @@
+ 
+ class SkinnedRectangle : public c2d::RectangleShape {
+ public:
+-    explicit SkinnedRectangle(c2dui::UiMain *main, const std::vector<std::string> &cfgTree);
++    explicit SkinnedRectangle(pemu::UiMain *main, const std::vector<std::string> &cfgTree);
+ 
+     bool load();
+ 
+ private:
+     std::vector<std::string> mTree;
+-    c2dui::UiMain *pMain;
+-    c2dui::Skin *pSkin;
++    pemu::UiMain *pMain;
++    pemu::Skin *pSkin;
+     c2d::Io *pIo;
+     c2d::Texture *pTex = nullptr;
+ };
+diff --git a/ui/skin/SkinnedText.cpp b/src/skeleton/skin/SkinnedText.cpp
+similarity index 98%
+rename from ui/skin/SkinnedText.cpp
+rename to src/skeleton/skin/SkinnedText.cpp
+index 8855915..52d7184 100644
+--- a/ui/skin/SkinnedText.cpp
++++ b/src/skeleton/skin/SkinnedText.cpp
+@@ -2,7 +2,7 @@
+ // Created by cpasjuste on 13/12/2021.
+ //
+ 
+-#include "c2dui.h"
++#include "skeleton/pemu.h"
+ 
+ SkinnedText::SkinnedText(UiMain *main, const std::vector<std::string> &cfgTree) : Text() {
+     pMain = main;
+diff --git a/ui/skin/SkinnedText.h b/src/skeleton/skin/SkinnedText.h
+similarity index 65%
+rename from ui/skin/SkinnedText.h
+rename to src/skeleton/skin/SkinnedText.h
+index dd8bd3f..4eeb996 100644
+--- a/ui/skin/SkinnedText.h
++++ b/src/skeleton/skin/SkinnedText.h
+@@ -7,14 +7,14 @@
+ 
+ class SkinnedText : public c2d::Text {
+ public:
+-    explicit SkinnedText(c2dui::UiMain *main, const std::vector<std::string> &cfgTree);
++    explicit SkinnedText(pemu::UiMain *main, const std::vector<std::string> &cfgTree);
+ 
+     bool load();
+ 
+ private:
+     std::vector<std::string> mTree;
+-    c2dui::UiMain *pMain;
+-    c2dui::Skin *pSkin;
++    pemu::UiMain *pMain;
++    pemu::Skin *pSkin;
+     c2d::Io *pIo;
+ };
+ 
+diff --git a/ui/c2dui_ui_emu.cpp b/src/skeleton/ui_emu.cpp
+similarity index 86%
+rename from ui/c2dui_ui_emu.cpp
+rename to src/skeleton/ui_emu.cpp
+index ad83161..eb6a6a1 100644
+--- a/ui/c2dui_ui_emu.cpp
++++ b/src/skeleton/ui_emu.cpp
+@@ -2,7 +2,7 @@
+ // Created by cpasjuste on 03/02/18.
+ //
+ 
+-#include "c2dui.h"
++#include "pemu.h"
+ 
+ UiEmu::UiEmu(UiMain *u) : RectangleShape(u->getSize()) {
+     printf("UiEmu()\n");
+@@ -35,8 +35,8 @@ void UiEmu::addAudio(int rate, int samples, Audio::C2DAudioCallback cb) {
+ void UiEmu::addVideo(C2DUIVideo *v) {
+     delete (video);
+     video = v;
+-    video->setShader(pMain->getConfig()->get(Option::Id::ROM_SHADER, true)->getIndex());
+-    video->setFilter((Texture::Filter) pMain->getConfig()->get(Option::Id::ROM_FILTER, true)->getIndex());
++    video->setShader(pMain->getConfig()->get(PEMUConfig::OptId::EMU_SHADER, true)->getArrayIndex());
++    video->setFilter((Texture::Filter) pMain->getConfig()->get(PEMUConfig::OptId::EMU_FILTER, true)->getArrayIndex());
+     video->updateScaling();
+     add(video);
+ }
+@@ -87,9 +87,9 @@ void UiEmu::resume() {
+     pMain->getInput()->setRepeatDelay(0);
+ 
+ #ifdef __VITA__
+-    Option *option = pMain->getConfig()->get(Option::Id::ROM_WAIT_RENDERING, true);
++    config::Option *option = pMain->getConfig()->get(PEMUConfig::OptId::EMU_WAIT_RENDERING, true);
+     if (option) {
+-        ((PSP2Renderer *) pMain)->setWaitRendering(option->getValueBool());
++        ((PSP2Renderer *) pMain)->setWaitRendering(option->getInteger());
+     }
+ #endif
+ 
+@@ -121,6 +121,11 @@ void UiEmu::stop() {
+ 
+     pMain->updateInputMapping(false);
+     setVisibility(Visibility::Hidden);
++
++    if (mExitOnStop) {
++        pMain->setVisibility(Visibility::Hidden);
++        getUi()->done = true;
++    }
+ }
+ 
+ bool UiEmu::onInput(c2d::Input::Player *players) {
+@@ -144,7 +149,7 @@ void UiEmu::onUpdate() {
+ 
+     if (!isPaused()) {
+         // fps
+-        bool showFps = pMain->getConfig()->get(Option::Id::ROM_SHOW_FPS, true)->getValueBool();
++        bool showFps = pMain->getConfig()->get(PEMUConfig::OptId::EMU_SHOW_FPS, true)->getInteger();
+         if (showFps) {
+             if (!fpsText->isVisible()) {
+                 fpsText->setVisibility(c2d::Visibility::Visible);
+diff --git a/ui/c2dui_ui_emu.h b/src/skeleton/ui_emu.h
+similarity index 86%
+rename from ui/c2dui_ui_emu.h
+rename to src/skeleton/ui_emu.h
+index 1a1c875..73c6b14 100644
+--- a/ui/c2dui_ui_emu.h
++++ b/src/skeleton/ui_emu.h
+@@ -5,13 +5,10 @@
+ #ifndef C2DUI_UI_EMU_H
+ #define C2DUI_UI_EMU_H
+ 
+-namespace c2dui {
+-
++namespace pemu {
+     class UiEmu : public c2d::RectangleShape {
+-
+     public:
+-
+-        UiEmu(UiMain *ui);
++        explicit UiEmu(UiMain *ui);
+ 
+         virtual int load(const ss_api::Game &game);
+ 
+@@ -47,8 +44,11 @@ namespace c2dui {
+             return currentGame;
+         }
+ 
+-    protected:
++        void setExitOnStop(bool value) { mExitOnStop = value; }
++
++        bool getExitOnStop() { return mExitOnStop; }
+ 
++    protected:
+         void onUpdate() override;
+ 
+         ss_api::Game currentGame;
+@@ -59,6 +59,7 @@ namespace c2dui {
+         char fpsString[32];
+         float targetFps = 60;
+         bool paused = true;
++        bool mExitOnStop = false;
+     };
+ }
+ 
+diff --git a/ui/c2dui_ui_help.cpp b/src/skeleton/ui_help.cpp
+similarity index 80%
+rename from ui/c2dui_ui_help.cpp
+rename to src/skeleton/ui_help.cpp
+index 8f0c423..3ce6d10 100644
+--- a/ui/c2dui_ui_help.cpp
++++ b/src/skeleton/ui_help.cpp
+@@ -2,7 +2,7 @@
+ // Created by cpasjuste on 08/12/18.
+ //
+ 
+-#include "c2dui.h"
++#include "pemu.h"
+ 
+ UiHelp::UiHelp(UiMain *ui) : SkinnedRectangle(ui, {"MAIN", "HELP"}) {
+     int button1, button2;
+@@ -12,11 +12,11 @@ UiHelp::UiHelp(UiMain *ui) : SkinnedRectangle(ui, {"MAIN", "HELP"}) {
+     float pos = addItem(true, font, {ui->getSkin()->getButton(100)},
+                         "NAVIGATION", {4, getSize().y / 2});
+     // run
+-    button1 = ui->getConfig()->get(Option::Id::JOY_A)->getValueInt();
++    button1 = ui->getConfig()->getOption(PEMUConfig::OptId::JOY_A)->getInteger();
+     pos = addItem(true, font, {ui->getSkin()->getButton(button1)},
+                   "RUN", {pos + 12, getSize().y / 2});
+     // favorite
+-    button1 = ui->getConfig()->get(Option::Id::JOY_X)->getValueInt();
++    button1 = ui->getConfig()->getOption(PEMUConfig::OptId::JOY_X)->getInteger();
+     if (ui->getSize().x > 640) {
+         pos = addItem(true, font, {ui->getSkin()->getButton(button1)},
+                       "ADD / REMOVE FAVORITE", {pos + 12, getSize().y / 2});
+@@ -26,10 +26,10 @@ UiHelp::UiHelp(UiMain *ui) : SkinnedRectangle(ui, {"MAIN", "HELP"}) {
+     }
+ 
+     if (ui->getSize().x > 640) {
+-        if (!(ui->getConfig()->get(Option::Id::GUI_FILTER_SYSTEM)->getFlags() & Option::Flags::HIDDEN)) {
++        if (!(ui->getConfig()->get(PEMUConfig::OptId::UI_FILTER_SYSTEM)->getFlags() & PEMUConfig::Flags::HIDDEN)) {
+             // system
+-            button1 = ui->getConfig()->get(Option::Id::JOY_LT)->getValueInt();
+-            button2 = ui->getConfig()->get(Option::Id::JOY_RT)->getValueInt();
++            button1 = ui->getConfig()->getOption(PEMUConfig::OptId::JOY_LT)->getInteger();
++            button2 = ui->getConfig()->getOption(PEMUConfig::OptId::JOY_RT)->getInteger();
+             addItem(true, font,
+                     {ui->getSkin()->getButton(button1), ui->getSkin()->getButton(button2)},
+                     "SWITCH SYSTEM", {pos + 12, getSize().y / 2});
+@@ -37,11 +37,11 @@ UiHelp::UiHelp(UiMain *ui) : SkinnedRectangle(ui, {"MAIN", "HELP"}) {
+     }
+ 
+     // main menu
+-    button1 = ui->getConfig()->get(Option::Id::JOY_MENU1)->getValueInt();
++    button1 = ui->getConfig()->getOption(PEMUConfig::OptId::JOY_MENU1)->getInteger();
+     pos = addItem(false, font, {ui->getSkin()->getButton(button1)},
+                   "MAIN MENU", {getSize().x - 4, getSize().y / 2});
+ 
+-    button1 = ui->getConfig()->get(Option::Id::JOY_MENU2)->getValueInt();
++    button1 = ui->getConfig()->getOption(PEMUConfig::OptId::JOY_MENU2)->getInteger();
+     addItem(false, font, {ui->getSkin()->getButton(button1)},
+             "ROM MENU", {pos - 12, getSize().y / 2});
+ }
+diff --git a/ui/c2dui_ui_help.h b/src/skeleton/ui_help.h
+similarity index 95%
+rename from ui/c2dui_ui_help.h
+rename to src/skeleton/ui_help.h
+index d333e8a..bd5b6d7 100644
+--- a/ui/c2dui_ui_help.h
++++ b/src/skeleton/ui_help.h
+@@ -5,7 +5,7 @@
+ #ifndef C2DUI_HELP_H
+ #define C2DUI_HELP_H
+ 
+-namespace c2dui {
++namespace pemu {
+ 
+     class UiHelp : public SkinnedRectangle {
+ 
+diff --git a/ui/c2dui_ui_highlight.cpp b/src/skeleton/ui_highlight.cpp
+similarity index 98%
+rename from ui/c2dui_ui_highlight.cpp
+rename to src/skeleton/ui_highlight.cpp
+index dcc84d7..0f01f30 100644
+--- a/ui/c2dui_ui_highlight.cpp
++++ b/src/skeleton/ui_highlight.cpp
+@@ -2,7 +2,7 @@
+ // Created by cpasjuste on 01/02/19.
+ //
+ 
+-#include "c2dui.h"
++#include "pemu.h"
+ 
+ UIHighlight::UIHighlight() : RectangleShape(FloatRect{}) {
+ 
+diff --git a/ui/c2dui_ui_highlight.h b/src/skeleton/ui_highlight.h
+similarity index 96%
+rename from ui/c2dui_ui_highlight.h
+rename to src/skeleton/ui_highlight.h
+index a66db55..89deece 100644
+--- a/ui/c2dui_ui_highlight.h
++++ b/src/skeleton/ui_highlight.h
+@@ -5,7 +5,7 @@
+ #ifndef C2DUI_HIGHLIGHT_H
+ #define C2DUI_HIGHLIGHT_H
+ 
+-namespace c2dui {
++namespace pemu {
+ 
+     class UIHighlight : public c2d::RectangleShape {
+ 
+diff --git a/ui/c2dui_ui_listbox.cpp b/src/skeleton/ui_listbox.cpp
+similarity index 90%
+rename from ui/c2dui_ui_listbox.cpp
+rename to src/skeleton/ui_listbox.cpp
+index bd8cc83..9d6d646 100644
+--- a/ui/c2dui_ui_listbox.cpp
++++ b/src/skeleton/ui_listbox.cpp
+@@ -2,10 +2,10 @@
+ // Created by cpasjuste on 05/01/18.
+ //
+ 
+-#include "c2dui.h"
++#include "pemu.h"
+ 
+ using namespace c2d;
+-using namespace c2dui;
++using namespace pemu;
+ using namespace ss_api;
+ 
+ UIListBoxLine::UIListBoxLine(
+@@ -100,25 +100,20 @@ UIListBoxLine::~UIListBoxLine() {
+ }
+ 
+ UIListBox::UIListBox(UiMain *_ui, Font *font, int fontSize, const FloatRect &rect,
+-                     const std::vector<ss_api::Game> &g, bool useIcons) : RectangleShape(rect) {
++                     const std::vector<ss_api::Game> &g) : RectangleShape(rect) {
+     //printf("ListBox(%p)\n", this);
+     ui = _ui;
+     setGames(g);
+-    init(font, fontSize, useIcons);
++    init(font, fontSize);
+     setSelection(0);
+ };
+ 
+-void UIListBox::init(Font *font, int fontSize, bool useIcons) {
+-    use_icons = useIcons;
++void UIListBox::init(Font *font, int fontSize) {
+     // set default bg colors
+     setFillColor(Color::GrayLight);
+ 
+     // calculate number of lines shown
+-    if (use_icons) {
+-        line_height = 34; // 32px + 2px margin
+-    } else {
+-        line_height = (float) fontSize + (2 * ui->getScaling().y);
+-    }
++    line_height = (float) fontSize + (2 * ui->getScaling().y);
+     max_lines = (int) (getSize().y / line_height);
+     if ((float) max_lines * line_height < getSize().y) {
+         line_height = getSize().y / (float) max_lines;
+@@ -137,15 +132,14 @@ void UIListBox::init(Font *font, int fontSize, bool useIcons) {
+             icon = files.size() > i ? files[i]->icon : nullptr;
+         }
+         */
+-        auto *line = new UIListBoxLine(r, "W", font, (unsigned int) fontSize,
+-                                       ui->getScaling(), icon, use_icons);
++        auto *line = new UIListBoxLine(r, "W", font, (unsigned int) fontSize, ui->getScaling(), icon);
+         lines.push_back(line);
+         add(line);
+     }
+ }
+ 
+ void UIListBox::updateLines() {
+-    bool useZipName = ui->getConfig()->get(Option::Id::GUI_SHOW_ZIP_NAMES)->getValueBool();
++    bool useZipName = ui->getConfig()->getOption(PEMUConfig::OptId::UI_SHOW_ZIP_NAMES)->getInteger();
+ 
+     for (unsigned int i = 0; i < (unsigned int) max_lines; i++) {
+         if (file_index + i >= games.size()) {
+@@ -186,16 +180,14 @@ void UIListBox::updateLines() {
+ void UIListBox::up() {
+     int index = file_index + highlight_index;
+     int middle = max_lines / 2;
+-
+     if (highlight_index <= middle && index - middle > 0) {
+         file_index--;
+     } else {
+         highlight_index--;
+     }
+-
+     if (highlight_index < 0) {
+-        highlight_index = (int) games.size() < max_lines - 1 ? (int) games.size() - 1 : max_lines - 1;
+-        file_index = ((int) games.size() - 1) - highlight_index;
++        highlight_index = (int) games.size() < max_lines ? (int) games.size() - 1 : max_lines - 1;
++        file_index = (int) games.size() - 1 - highlight_index;
+     }
+ 
+     updateLines();
+@@ -204,13 +196,11 @@ void UIListBox::up() {
+ void UIListBox::down() {
+     int index = file_index + highlight_index;
+     int middle = max_lines / 2;
+-
+-    if (highlight_index >= middle && index + (max_lines - middle) < (int) games.size()) {
++    if (highlight_index >= middle && index + middle < (int) games.size()) {
+         file_index++;
+     } else {
+         highlight_index++;
+     }
+-
+     if (highlight_index >= max_lines || file_index + highlight_index >= (int) games.size()) {
+         file_index = 0;
+         highlight_index = 0;
+@@ -220,11 +210,13 @@ void UIListBox::down() {
+ }
+ 
+ void UIListBox::setSelection(int new_index) {
++    if (new_index < 0) new_index = 0;
++    if (new_index > (int) games.size()) new_index = (int) games.size() - 1;
+     if (new_index < max_lines / 2) {
+         file_index = 0;
+         highlight_index = 0;
+     } else if (new_index > (int) games.size() - max_lines / 2) {
+-        highlight_index = max_lines / 2;
++        highlight_index = max_lines - 1;
+         file_index = (int) games.size() - 1 - highlight_index;
+         if (highlight_index >= (int) games.size()) {
+             highlight_index = (int) games.size() - 1;
+diff --git a/ui/c2dui_ui_listbox.h b/src/skeleton/ui_listbox.h
+similarity index 92%
+rename from ui/c2dui_ui_listbox.h
+rename to src/skeleton/ui_listbox.h
+index 5a8b9b3..117990c 100644
+--- a/ui/c2dui_ui_listbox.h
++++ b/src/skeleton/ui_listbox.h
+@@ -5,7 +5,7 @@
+ #ifndef C2DUI_LISTBOX_H
+ #define C2DUI_LISTBOX_H
+ 
+-namespace c2dui {
++namespace pemu {
+ 
+     class UIListBoxLine : public c2d::RectangleShape {
+ 
+@@ -42,7 +42,7 @@ namespace c2dui {
+     public:
+ 
+         UIListBox(UiMain *ui, c2d::Font *font, int fontSize, const c2d::FloatRect &rect,
+-                  const std::vector<ss_api::Game> &games, bool useIcons = false);
++                  const std::vector<ss_api::Game> &games);
+ 
+         ~UIListBox() override;
+ 
+@@ -83,7 +83,7 @@ namespace c2dui {
+ 
+     private:
+ 
+-        void init(c2d::Font *font, int fontSize, bool useIcons);
++        void init(c2d::Font *font, int fontSize);
+ 
+         void updateLines();
+ 
+@@ -95,7 +95,6 @@ namespace c2dui {
+         int max_lines;
+         int file_index = 0;
+         int highlight_index = 0;
+-        bool use_icons = false;
+         bool use_highlight = true;
+         bool highlight_use_files_color = false;
+     };
+diff --git a/ui/c2dui_ui_main.cpp b/src/skeleton/ui_main.cpp
+similarity index 70%
+rename from ui/c2dui_ui_main.cpp
+rename to src/skeleton/ui_main.cpp
+index 0724411..f0828e5 100644
+--- a/ui/c2dui_ui_main.cpp
++++ b/src/skeleton/ui_main.cpp
+@@ -3,19 +3,18 @@
+ //
+ 
+ #include <algorithm>
+-#include "c2dui.h"
+-#include "c2dui_ui_main.h"
++#include "pemu.h"
++#include "ui_main.h"
+ 
+ #ifdef __SWITCH__
+-UiMain::UiMain(c2d::Io *io) : C2DRenderer({1280, 720}) {
++UiMain::UiMain(c2d::Io *io, const Vector2f &size) : C2DRenderer({1280, 720}) {
+ #else
+-UiMain::UiMain(c2d::Io *io) : C2DRenderer() {
++UiMain::UiMain(const Vector2f &size) : C2DRenderer(size) {
+ #endif
+     printf("UiMain(%ix%i)\n", (int) UiMain::getSize().x, (int) UiMain::getSize().y);
+-    setIo(io);
+ }
+ 
+-void UiMain::init(UIRomList *romList, UiMenu *menu, UiEmu *emu, UiStateMenu *state) {
++void UiMain::init(UIRomList *romList, UiMenu *menu, UiEmu *emu, UiMenuState *state) {
+     pRomList = romList;
+     pRomList->updateRomList();
+     add(pRomList);
+@@ -57,10 +56,6 @@ void UiMain::init(UIRomList *romList, UiMenu *menu, UiEmu *emu, UiStateMenu *sta
+     getInput()->setRepeatDelay(INPUT_DELAY);
+ }
+ 
+-void UiMain::setSkin(Skin *s) {
+-    pSkin = s;
+-}
+-
+ void UiMain::onUpdate() {
+     unsigned int buttons = getInput()->getButtons();
+     if (buttons & Input::Button::Quit) {
+@@ -90,68 +85,16 @@ void UiMain::onUpdate() {
+     C2DRenderer::onUpdate();
+ }
+ 
+-Skin *UiMain::getSkin() {
+-    return pSkin;
+-}
+-
+-void UiMain::setConfig(Config *cfg) {
++void UiMain::setConfig(PEMUConfig *cfg) {
+     pConfig = cfg;
+ 
+-    // add shaders, if any
+-    auto shaderList = getShaderList();
+-    if (shaderList) {
+-        pConfig->add(Option::Id::ROM_FILTER, "EFFECT", shaderList->getNames(), 0,
+-                     Option::Id::ROM_SHADER, Option::Flags::STRING);
+-    } else {
+-        pConfig->add(Option::Id::ROM_FILTER, "EFFECT", {"NONE"}, 0,
+-                     Option::Id::ROM_SHADER, Option::Flags::STRING | Option::Flags::HIDDEN);
++    // set fullscreen if requested by config
++    const auto fs = pConfig->get(PEMUConfig::OptId::UI_FULLSCREEN);
++    if (fs && fs->getInteger()) {
++        setFullscreen(fs);
+     }
+ }
+ 
+-Config *UiMain::getConfig() {
+-    return pConfig;
+-}
+-
+-UIHighlight *UiMain::getUiHighlight() {
+-    return pHighlight;
+-}
+-
+-UIRomList *UiMain::getUiRomList() {
+-    return pRomList;
+-}
+-
+-UiEmu *UiMain::getUiEmu() {
+-    return pEmu;
+-}
+-
+-UiMenu *UiMain::getUiMenu() {
+-    return pMenu;
+-}
+-
+-UiStateMenu *UiMain::getUiStateMenu() {
+-    return pState;
+-}
+-
+-UIProgressBox *UiMain::getUiProgressBox() {
+-    return pProgressBox;
+-}
+-
+-UiStatusBox *UiMain::getUiStatusBox() {
+-    return pStatusBox;
+-}
+-
+-c2d::MessageBox *UiMain::getUiMessageBox() {
+-    return pMessageBox;
+-}
+-
+-int UiMain::getFontSize() {
+-    return (int) ((float) C2D_DEFAULT_CHAR_SIZE * pSkin->getScaling().y);
+-}
+-
+-Vector2f UiMain::getScaling() {
+-    return pSkin->getScaling();
+-}
+-
+ void UiMain::updateInputMapping(bool isRomConfig) {
+     if (isRomConfig) {
+ #ifndef NO_KEYBOARD
+@@ -170,9 +113,9 @@ void UiMain::updateInputMapping(bool isRomConfig) {
+         // keep custom config for menus keys
+         for (unsigned int i = 0; i < keyMapping.size(); i++) {
+             if (keyMapping.at(i).button == Input::Button::Menu1) {
+-                keyMapping.at(i).value = pConfig->get(Option::Id::KEY_MENU1, false)->getValueInt();
++                keyMapping.at(i).value = pConfig->get(PEMUConfig::OptId::KEY_MENU1, false)->getInteger();
+             } else if (keyMapping.at(i).button == Input::Button::Menu2) {
+-                keyMapping.at(i).value = pConfig->get(Option::Id::KEY_MENU2, false)->getValueInt();
++                keyMapping.at(i).value = pConfig->get(PEMUConfig::OptId::KEY_MENU2, false)->getInteger();
+             }
+         }
+         getInput()->setKeyboardMapping(keyMapping);
+@@ -181,9 +124,9 @@ void UiMain::updateInputMapping(bool isRomConfig) {
+         // keep custom config for menus keys
+         for (unsigned int i = 0; i < joyMapping.size(); i++) {
+             if (joyMapping.at(i).button == Input::Button::Menu1) {
+-                joyMapping.at(i).value = pConfig->get(Option::Id::JOY_MENU1, false)->getValueInt();
++                joyMapping.at(i).value = pConfig->get(PEMUConfig::OptId::JOY_MENU1, false)->getInteger();
+             } else if (joyMapping.at(i).button == Input::Button::Menu2) {
+-                joyMapping.at(i).value = pConfig->get(Option::Id::JOY_MENU2, false)->getValueInt();
++                joyMapping.at(i).value = pConfig->get(PEMUConfig::OptId::JOY_MENU2, false)->getInteger();
+             }
+         }
+         for (int i = 0; i < PLAYER_MAX; i++) {
+diff --git a/src/skeleton/ui_main.h b/src/skeleton/ui_main.h
+new file mode 100644
+index 0000000..808ac1e
+--- /dev/null
++++ b/src/skeleton/ui_main.h
+@@ -0,0 +1,69 @@
++//
++// Created by cpasjuste on 14/01/18.
++//
++
++#ifndef GUI_H
++#define GUI_H
++
++#define INPUT_DELAY 200
++
++namespace pemu {
++
++    class UiMain : public c2d::C2DRenderer {
++
++    public:
++        explicit UiMain(const c2d::Vector2f &size = c2d::Vector2f(0, 0));
++
++        void init(UIRomList *romList, UiMenu *menu, UiEmu *emu, UiMenuState *state);
++
++        void setConfig(PEMUConfig *cfg);
++
++        void onUpdate() override;
++
++        void updateInputMapping(bool isRomCfg);
++
++        Skin *getSkin() { return pSkin; }
++
++        void setSkin(Skin *s) { pSkin = s; }
++
++        PEMUConfig *getConfig() { return pConfig; }
++
++        UIHighlight *getUiHighlight() { return pHighlight; }
++
++        UIRomList *getUiRomList() { return pRomList; }
++
++        UiEmu *getUiEmu() { return pEmu; }
++
++        UiMenu *getUiMenu() { return pMenu; }
++
++        UiMenuState *getUiStateMenu() { return pState; }
++
++        UiStatusBox *getUiStatusBox() { return pStatusBox; }
++
++        UIProgressBox *getUiProgressBox() { return pProgressBox; }
++
++        c2d::MessageBox *getUiMessageBox() { return pMessageBox; }
++
++        int getFontSize() { return (int) ((float) C2D_DEFAULT_CHAR_SIZE * pSkin->getScaling().y); }
++
++        c2d::Vector2f getScaling() { return pSkin->getScaling(); }
++
++        bool done = false;
++
++    private:
++        PEMUConfig *pConfig = nullptr;
++        Skin *pSkin = nullptr;
++        UIHighlight *pHighlight = nullptr;
++        UiMenu *pMenu = nullptr;
++        UIRomList *pRomList = nullptr;
++        UiEmu *pEmu = nullptr;
++        UiMenuState *pState = nullptr;
++        UIProgressBox *pProgressBox = nullptr;
++        c2d::MessageBox *pMessageBox = nullptr;
++        UiStatusBox *pStatusBox = nullptr;
++        c2d::C2DClock mTimer;
++        unsigned int mOldKeys = 0;
++    };
++}
++
++#endif //GUI_H
+diff --git a/src/skeleton/ui_menu.cpp b/src/skeleton/ui_menu.cpp
+new file mode 100644
+index 0000000..2b253af
+--- /dev/null
++++ b/src/skeleton/ui_menu.cpp
+@@ -0,0 +1,440 @@
++//
++// Created by cpasjuste on 30/01/18.
++//
++
++#include "pemu.h"
++#include "ui_menu.h"
++
++using namespace c2d::config;
++
++class MenuLine : public c2d::RectangleShape {
++
++public:
++    MenuLine(UiMain *u, FloatRect &rect, Skin::TextGroup &tg) : RectangleShape(rect) {
++        pMain = u;
++        m_textGroup = tg;
++        Font *font = pMain->getSkin()->getFont();
++
++        p_name = new Text("OPTION NAME", m_textGroup.size, font);
++        p_name->setFillColor(m_textGroup.color);
++        p_name->setOutlineThickness(m_textGroup.outlineSize);
++        p_name->setOutlineColor(m_textGroup.outlineColor);
++        p_name->setOrigin(Origin::Left);
++        p_name->setPosition(2 * pMain->getScaling().x, MenuLine::getSize().y / 2);
++        p_name->setSizeMax((MenuLine::getSize().x * 0.55f), 0);
++        MenuLine::add(p_name);
++
++        p_value = new Text("OPTION VALUE", m_textGroup.size, font);
++        p_value->setFillColor(m_textGroup.color);
++        p_value->setOutlineThickness(m_textGroup.outlineSize);
++        p_value->setOutlineColor(m_textGroup.outlineColor);
++        p_value->setOrigin(Origin::Left);
++        p_value->setPosition((MenuLine::getSize().x * 0.6f), MenuLine::getSize().y / 2);
++        p_value->setSizeMax(MenuLine::getSize().x * 0.38f, 0);
++        MenuLine::add(p_value);
++
++        p_sprite = new Sprite();
++        MenuLine::add(p_sprite);
++    }
++
++    void refresh() {
++        set(p_name->getString(), p_option);
++    }
++
++    void set(const std::string &name, Option *option) {
++        p_option = option;
++
++        // reset
++        setVisibility(Visibility::Visible);
++        p_sprite->setVisibility(Visibility::Hidden);
++        p_name->setString(name);
++        p_value->setVisibility(Visibility::Visible);
++        setFillColor(Color::Transparent);
++
++        // this is a menu title (or custom option)
++        if (!option) {
++            // custom options
++            if (name == "STATES" || name == "QUIT") {
++                p_value->setVisibility(Visibility::Visible);
++                p_value->setString("GO");
++                return;
++            }
++            p_value->setVisibility(Visibility::Hidden);
++            setFillColor(pMain->getUiMenu()->getOutlineColor());
++            return;
++        }
++
++        // this is an option
++        if (option->getFlags() & PEMUConfig::Flags::INPUT) {
++            Skin::Button *button = pMain->getSkin()->getButton(option->getInteger());
++            if (button && option->getId() < PEMUConfig::OptId::JOY_DEADZONE) {
++                if (button->texture) {
++                    p_sprite->setTexture(button->texture, true);
++                    p_sprite->setVisibility(Visibility::Visible);
++                    p_value->setVisibility(Visibility::Hidden);
++                    float scaling = std::min(
++                            getSize().x / (float) p_sprite->getSize().x,
++                            getSize().y / (float) p_sprite->getSize().y);
++                    p_sprite->setScale(scaling, scaling);
++                    p_sprite->setPosition((MenuLine::getSize().x * 0.6f), MenuLine::getSize().y / 2);
++                    p_sprite->setOrigin(Origin::Left);
++                } else {
++                    p_sprite->setVisibility(Visibility::Hidden);
++                    p_value->setVisibility(Visibility::Visible);
++                    p_value->setString(button->name);
++                }
++            } else {
++                char btn[16];
++                snprintf(btn, 16, "%i", option->getInteger());
++                p_value->setVisibility(Visibility::Visible);
++                p_value->setString(btn);
++            }
++        } else {
++            p_value->setVisibility(Visibility::Visible);
++            p_value->setString(option->getString());
++        }
++    }
++
++    UiMain *pMain = nullptr;
++    Text *p_name = nullptr;
++    Text *p_value = nullptr;
++    Sprite *p_sprite = nullptr;
++    Option *p_option = nullptr;
++    Skin::TextGroup m_textGroup;
++};
++
++UiMenu::UiMenu(UiMain *uiMain) : SkinnedRectangle(uiMain, {"OPTIONS_MENU"}) {
++    ui = uiMain;
++    alpha = UiMenu::getAlpha();
++
++    // menu title
++    title = new SkinnedText(uiMain, {"OPTIONS_MENU", "TITLE_TEXT"});
++    UiMenu::add(title);
++
++    // retrieve skin config for options items
++    textGroup = ui->getSkin()->getText({"OPTIONS_MENU", "ITEMS_TEXT"});
++
++    // calculate number of items shown
++    lineHeight = (float) textGroup.size + (2 * ui->getScaling().y);
++    maxLines = (int) (UiMenu::getSize().y / lineHeight);
++    if ((float) maxLines * lineHeight < UiMenu::getSize().y) {
++        lineHeight = UiMenu::getSize().y / (float) maxLines;
++    }
++
++    // add selection rectangle (highlight)
++    highlight = new RectangleShape({16, 16});
++    ui->getSkin()->loadRectangleShape(highlight, {"SKIN_CONFIG", "HIGHLIGHT"});
++    highlight->setSize(UiMenu::getSize().x - 2, lineHeight - (highlight->getOutlineThickness() * 2));
++    highlight->move(1, 0);
++    UiMenu::add(highlight);
++
++    // add options items
++    for (unsigned int i = 0; i < (unsigned int) maxLines; i++) {
++        FloatRect r = {0, lineHeight * (float) i, UiMenu::getSize().x, lineHeight};
++        auto line = new MenuLine(ui, r, textGroup);
++        lines.push_back(line);
++        UiMenu::add(line);
++    }
++
++    // tween
++    Vector2f targetPos = {UiMenu::getPosition().x - UiMenu::getSize().x,
++                          UiMenu::getPosition().y};
++    tweenPosition = new TweenPosition({UiMenu::getPosition()}, targetPos, 0.2f);
++    tweenPosition->setState(TweenState::Stopped);
++    UiMenu::add(tweenPosition);
++
++    // hide by default
++    UiMenu::setVisibility(Visibility::Hidden);
++}
++
++void UiMenu::load(bool isGame) {
++    isRomMenu = isGame;
++    isEmuRunning = ui->getUiEmu()->isVisible();
++    Game game = ui->getUiRomList()->getSelection();
++
++    if (isRomMenu) {
++        ui->getConfig()->loadGame(game);
++        bool useZipName = ui->getConfig()->getOption(PEMUConfig::OptId::UI_SHOW_ZIP_NAMES)->getInteger();
++        title->setString(useZipName ? Utility::removeExt(game.path) : game.name);
++    } else {
++        title->setString("MAIN OPTIONS");
++    }
++
++    // set options items
++    optionIndex = highlightIndex = 0;
++    menu_options.clear();
++    auto groups = ui->getConfig()->getGroups();
++    for (auto &group: *groups) {
++        // skip some options if needed
++        if (group.getName() == "ROMS") continue;
++        if (isRomMenu && (group.getName() == "UI_OPTIONS" || group.getName() == "UI_FILTERING")) continue;
++        // push group title
++        menu_options.push_back({group.getName(), nullptr});
++        auto options = group.getOptions();
++        for (auto &option: *options) {
++            // skip hidden options
++            if (option.getFlags() & PEMUConfig::Flags::HIDDEN) continue;
++            // push option
++            auto opt = ui->getConfig()->get(option.getId(), isGame);
++            menu_options.push_back({option.getName(), opt});
++        }
++    }
++
++    // add "OTHER" option menu
++    menu_options.push_back({"OTHER", nullptr});
++    if (isRomMenu) menu_options.push_back({"STATES", nullptr});
++    menu_options.push_back({"QUIT", nullptr});
++
++    setAlpha(isEmuRunning ? (uint8_t) (alpha - 50) : (uint8_t) alpha);
++
++    // update options lines/items (first option should always be a menu option)
++    onKeyDown();
++
++    // finally, show me
++    if (!isVisible()) {
++        setLayer(1);
++        setVisibility(Visibility::Visible, true);
++    }
++}
++
++void UiMenu::updateLines() {
++    for (unsigned int i = 0; i < (unsigned int) maxLines; i++) {
++        if (optionIndex + i >= menu_options.size()) {
++            lines[i]->setVisibility(Visibility::Hidden);
++            continue;
++        }
++        // set line data
++        auto menuOption = menu_options.at(optionIndex + i);
++        lines[i]->set(menuOption.name, menuOption.option);
++        // set highlight position and color
++        if ((int) i == highlightIndex) {
++            highlight->setPosition({highlight->getPosition().x,
++                                    lines[i]->getPosition().y + highlight->getOutlineThickness()});
++            lines[i]->p_value->setOutlineColor(getOutlineColor());
++        } else {
++            lines[i]->p_value->setOutlineColor(textGroup.outlineColor);
++        }
++    }
++}
++
++void UiMenu::onKeyUp() {
++    int index = optionIndex + highlightIndex;
++    int middle = maxLines / 2;
++
++    if (highlightIndex <= middle && index - middle > 0) {
++        optionIndex--;
++    } else {
++        highlightIndex--;
++    }
++
++    if (highlightIndex < 0) {
++        highlightIndex = (int) menu_options.size() < maxLines - 1 ? (int) menu_options.size() - 1 : maxLines - 1;
++        optionIndex = ((int) menu_options.size() - 1) - highlightIndex;
++    }
++
++    // skip menus
++    auto opt = menu_options.at(optionIndex + highlightIndex);
++    if (opt.option == nullptr && opt.name != "STATES" && opt.name != "QUIT") {
++        return onKeyUp();
++    }
++
++    updateLines();
++}
++
++void UiMenu::onKeyDown() {
++    int index = optionIndex + highlightIndex;
++    int middle = maxLines / 2;
++
++    if (highlightIndex >= middle && index + (maxLines - middle) < (int) menu_options.size()) {
++        optionIndex++;
++    } else {
++        highlightIndex++;
++    }
++
++    if (highlightIndex >= maxLines || optionIndex + highlightIndex >= (int) menu_options.size()) {
++        optionIndex = 0;
++        highlightIndex = 0;
++    }
++
++    // skip menus
++    auto opt = menu_options.at(optionIndex + highlightIndex);
++    if (opt.option == nullptr && opt.name != "STATES" && opt.name != "QUIT") {
++        return onKeyDown();
++    }
++
++    updateLines();
++}
++
++bool UiMenu::onInput(c2d::Input::Player *players) {
++    unsigned int buttons = players[0].buttons;
++
++    if (ui->getUiStateMenu()->isVisible()) {
++        return C2DObject::onInput(players);
++    }
++
++    // UP
++    if (buttons & Input::Button::Up) {
++        onKeyUp();
++    }
++
++    // DOWN
++    if (buttons & Input::Button::Down) {
++        onKeyDown();
++    }
++
++    // LEFT /RIGHT
++    if (buttons & Input::Button::Left || buttons & Input::Button::Right) {
++        auto option = lines.at(highlightIndex)->p_option;
++        if (!option || option->getArray().size() <= 1) return true;
++        needSave = true;
++        if (buttons & Input::Button::Left) {
++            option->setArrayMovePrev();
++        } else {
++            option->setArrayMoveNext();
++        }
++        if (!option->getComment().empty()) {
++            ui->getUiStatusBox()->show(option->getComment());
++        }
++
++        switch (option->getId()) {
++            case PEMUConfig::OptId::UI_FILTER_FAVORITES:
++            case PEMUConfig::OptId::UI_FILTER_AVAILABLE:
++            case PEMUConfig::OptId::UI_SHOW_ZIP_NAMES:
++            case PEMUConfig::OptId::UI_FILTER_CLONES:
++            case PEMUConfig::OptId::UI_FILTER_SYSTEM:
++            case PEMUConfig::OptId::UI_FILTER_EDITOR:
++            case PEMUConfig::OptId::UI_FILTER_DEVELOPER:
++            case PEMUConfig::OptId::UI_FILTER_PLAYERS:
++            case PEMUConfig::OptId::UI_FILTER_RATING:
++            case PEMUConfig::OptId::UI_FILTER_DATE:
++            case PEMUConfig::OptId::UI_FILTER_GENRE: {
++                std::string name = Utility::toUpper(option->getName());
++                std::string value = Utility::toUpper(option->getString());
++                if (option->getComment().empty()) {
++                    ui->getUiStatusBox()->show("%s: %s", name.c_str(), value.c_str());
++                }
++                ui->getUiRomList()->updateRomList();
++                break;
++            }
++
++            case PEMUConfig::OptId::EMU_ROTATION:
++            case PEMUConfig::OptId::EMU_SCALING:
++                if (isEmuRunning) {
++                    ui->getUiEmu()->getVideo()->updateScaling();
++                    auto gw = (float) ui->getUiEmu()->getVideo()->getTextureRect().width;
++                    auto gh = (float) ui->getUiEmu()->getVideo()->getTextureRect().height;
++                    float gr = std::max(
++                            (float) ui->getUiEmu()->getVideo()->aspect.x /
++                            (float) ui->getUiEmu()->getVideo()->aspect.y,
++                            (float) ui->getUiEmu()->getVideo()->aspect.y /
++                            (float) ui->getUiEmu()->getVideo()->aspect.x);
++                    float ow = gw * ui->getUiEmu()->getVideo()->getScale().x;
++                    float oh = gh * ui->getUiEmu()->getVideo()->getScale().y;
++                    float ratio = std::max(ow / oh, oh / ow);
++                    ui->getUiStatusBox()->show(
++                            "GAME: %ix%i - RATIO: %.2f | OUTPUT: %ix%i - RATIO: %.2f - SCALING: %.2fx%.2f",
++                            (int) gw, (int) gh, gr, (int) ow, (int) oh, ratio,
++                            ui->getUiEmu()->getVideo()->getScale().x, ui->getUiEmu()->getVideo()->getScale().y);
++                }
++                break;
++            case PEMUConfig::OptId::EMU_SCALING_MODE:
++                if (option->getString() == "AUTO") {
++                    ui->getUiStatusBox()->show("TRY TO KEEP INTEGER SCALING IF ASPECT RATIO IS NOT TOO DIVERGENT");
++                } else if (option->getString() == "ASPECT") {
++                    ui->getUiStatusBox()->show("KEEP GAME ASPECT RATIO - SOME SHADERS MAY NOT RENDER CORRECTLY");
++                } else {
++                    ui->getUiStatusBox()->show(
++                            "FORCE INTEGER SCALING - ASPECT RATIO MAY BE WRONG BUT SHADERS WILL RENDER CORRECTLY");
++                }
++                if (isEmuRunning) {
++                    ui->getUiEmu()->getVideo()->updateScaling();
++                }
++                break;
++            case PEMUConfig::OptId::EMU_FILTER:
++                if (isEmuRunning) {
++                    ui->getUiEmu()->getVideo()->setFilter((Texture::Filter) option->getArrayIndex());
++                }
++                break;
++            case PEMUConfig::OptId::EMU_SHADER:
++                if (isEmuRunning) {
++                    ui->getUiEmu()->getVideo()->setShader(option->getArrayIndex());
++                    ui->getUiStatusBox()->show(option->getString());
++                }
++                break;
++#ifdef __VITA__
++                case PEMUConfig::OptId::EMU_WAIT_RENDERING:
++                        if (isEmuRunning) {
++                            ((PSP2Renderer *) ui)->setWaitRendering(option->getInteger());
++                        }
++                        break;
++#endif
++            case PEMUConfig::OptId::UI_VIDEO_SNAP_DELAY:
++                ui->getUiRomList()->setVideoSnapDelay(option->getInteger());
++                break;
++
++            default:
++                break;
++        }
++
++        // update option line
++        lines.at(highlightIndex)->refresh();
++    }
++
++    // FIRE1 (ENTER)
++    if (buttons & Input::Button::A) {
++        auto option = lines.at(highlightIndex)->p_option;
++        if (option && option->getFlags() == PEMUConfig::Flags::INPUT) {
++            int new_key = 0;
++            int res = ui->getUiMessageBox()->show("NEW INPUT", "PRESS A BUTTON", "", "", &new_key, 9);
++            if (res != MessageBox::TIMEOUT) {
++                needSave = true;
++                option->setInteger(new_key);
++                lines.at(highlightIndex)->refresh();
++            }
++        } else if (lines.at(highlightIndex)->p_name->getString() == "STATES") {
++            setVisibility(Visibility::Hidden, true);
++            ui->getUiStateMenu()->setVisibility(Visibility::Visible, true);
++        } else if (lines.at(highlightIndex)->p_name->getString() == "QUIT") {
++            if (isEmuRunning) {
++                setVisibility(Visibility::Hidden, true);
++                ui->getUiEmu()->stop();
++                ui->getUiRomList()->setVisibility(Visibility::Visible);
++                ui->getInput()->clear();
++            } else {
++                // be sure options are saved before exiting
++                if (isRomMenu) ui->getConfig()->saveGame();
++                else ui->getConfig()->save();
++                needSave = false;
++                ui->done = true;
++            }
++        }
++    }
++
++    // FIRE2 (BACK)
++    if (buttons & Input::Button::Menu1 || buttons & Input::Button::Menu2 || buttons & Input::Button::B) {
++        setVisibility(Visibility::Hidden, true);
++        if (isEmuRunning) {
++            ui->getUiEmu()->resume();
++        }
++    }
++
++    return true;
++}
++
++void UiMenu::setVisibility(Visibility visibility, bool tweenPlay) {
++    if (ui->getUiRomList() && ui->getUiRomList()->isVisible()) {
++        ui->getUiRomList()->getBlur()->setVisibility(visibility, true);
++    }
++
++    if (visibility == Visibility::Hidden && needSave) {
++        if (isRomMenu) ui->getConfig()->saveGame();
++        else ui->getConfig()->save();
++        needSave = false;
++    }
++
++    RectangleShape::setVisibility(visibility, tweenPlay);
++}
++
++UiMenu::~UiMenu() {
++    printf("~UIMenuNew\n");
++}
+diff --git a/ui/c2dui_ui_menu.h b/src/skeleton/ui_menu.h
+similarity index 81%
+rename from ui/c2dui_ui_menu.h
+rename to src/skeleton/ui_menu.h
+index 6a42ac1..1f61900 100644
+--- a/ui/c2dui_ui_menu.h
++++ b/src/skeleton/ui_menu.h
+@@ -7,11 +7,15 @@
+ 
+ class MenuLine;
+ 
+-namespace c2dui {
++namespace pemu {
+ 
+     class UiMenu : public SkinnedRectangle {
+ 
+     public:
++        struct MenuOption {
++            std::string name;
++            c2d::config::Option *option = nullptr;
++        };
+ 
+         explicit UiMenu(UiMain *uiMain);
+ 
+@@ -23,7 +27,7 @@ namespace c2dui {
+ 
+         bool isRom() const { return isRomMenu; };
+ 
+-        virtual bool isOptionHidden(Option *option) { return false; };
++        virtual bool isOptionHidden(c2d::config::Option *option) { return false; };
+ 
+         void onKeyUp();
+ 
+@@ -34,7 +38,6 @@ namespace c2dui {
+         void setVisibility(c2d::Visibility visibility, bool tweenPlay = false) override;
+ 
+     private:
+-
+         void updateLines();
+ 
+         UiMain *ui = nullptr;
+@@ -43,7 +46,7 @@ namespace c2dui {
+         std::vector<MenuLine *> lines;
+         float alpha = 230;
+ 
+-        std::vector<Option> options;
++        std::vector<MenuOption> menu_options;
+         c2d::TweenPosition *tweenPosition;
+         Skin::TextGroup textGroup;
+ 
+diff --git a/ui/c2dui_ui_menu_state.cpp b/src/skeleton/ui_menu_state.cpp
+similarity index 86%
+rename from ui/c2dui_ui_menu_state.cpp
+rename to src/skeleton/ui_menu_state.cpp
+index ffb884a..4f73a29 100644
+--- a/ui/c2dui_ui_menu_state.cpp
++++ b/src/skeleton/ui_menu_state.cpp
+@@ -2,16 +2,13 @@
+ // Created by cpasjuste on 16/02/18.
+ //
+ 
+-#include "c2dui.h"
++#include "pemu.h"
+ 
+ #define STATES_COUNT 4
+ 
+ class UiState : public SkinnedRectangle {
+-
+ public:
+-
+-    UiState(UiMain *ui, float x, int id)
+-            : SkinnedRectangle(ui, {"STATES_MENU", "STATES_ITEM"}) {
++    UiState(UiMain *ui, float x, int id) : SkinnedRectangle(ui, {"STATES_MENU", "STATES_ITEM"}) {
+         this->ui = ui;
+         this->id = id;
+ 
+@@ -76,20 +73,20 @@ public:
+     void setRom(const ss_api::Game &game) {
+         memset(path, 0, MAX_PATH);
+         memset(shot, 0, MAX_PATH);
+-        snprintf(path, 1023, "%ssaves/%s%i.sav",
++        snprintf(path, 1023, "%ssaves/%s-%i.state",
+                  ui->getIo()->getDataPath().c_str(), Utility::removeExt(game.path).c_str(), id);
+-        snprintf(shot, 1023, "%ssaves/%s%i.png",
++        snprintf(shot, 1023, "%ssaves/%s-%i.png",
+                  ui->getIo()->getDataPath().c_str(), Utility::removeExt(game.path).c_str(), id);
+ 
+         loadTexture();
+     }
+ 
+-    void load() {
++    void loadState() {
+         printf("StateLoad: %s\n", path);
+         ui->getUiStateMenu()->loadStateCore(path);
+     }
+ 
+-    void save() {
++    void saveState() {
+         printf("StateSave: %s\n", path);
+         if (ui->getUiStateMenu()->saveStateCore(path)) {
+             ui->getUiEmu()->getVideo()->save(shot);
+@@ -105,16 +102,14 @@ public:
+     Color outlineColor;
+     Color outlineColorSelected;
+ 
+-    char path[1024];
+-    char shot[1024];
++    char path[1024]{};
++    char shot[1024]{};
+     bool exist = false;
+     int id = 0;
+ };
+ 
+ class UiStateList : public RectangleShape {
+-
+ public:
+-
+     UiStateList(UiMain *ui, const FloatRect &rect) : RectangleShape(rect) {
+         UiStateList::setFillColor(Color::Transparent);
+ 
+@@ -129,7 +124,7 @@ public:
+         setSelection(0);
+     }
+ 
+-    ~UiStateList() {
++    ~UiStateList() override {
+         for (auto &state: states) {
+             delete state;
+         }
+@@ -170,11 +165,11 @@ public:
+         setSelection(index);
+     }
+ 
+-    UiState *states[STATES_COUNT];
++    UiState *states[STATES_COUNT]{};
+     int index = 0;
+ };
+ 
+-UiStateMenu::UiStateMenu(UiMain *u) : SkinnedRectangle(u, {"STATES_MENU"}) {
++UiMenuState::UiMenuState(UiMain *u) : SkinnedRectangle(u, {"STATES_MENU"}) {
+     printf("UIStateMenu()\n");
+ 
+     ui = u;
+@@ -183,26 +178,26 @@ UiStateMenu::UiStateMenu(UiMain *u) : SkinnedRectangle(u, {"STATES_MENU"}) {
+     title = new SkinnedText(ui, {"STATES_MENU", "TITLE_TEXT"});
+     title->setString("TITLE");
+     title->setStyle(Text::Underlined);
+-    UiStateMenu::add(title);
++    UiMenuState::add(title);
+ 
+     float start_y = title->getLocalBounds().top + title->getLocalBounds().height + (32 * ui->getScaling().y);
+     uiStateList = new UiStateList(ui, {
+-            UiStateMenu::getLocalBounds().left + UiStateMenu::getSize().x / 2, start_y,
+-            UiStateMenu::getSize().x - (64 * ui->getScaling().x), UiStateMenu::getSize().x / (STATES_COUNT + 1)
++            UiMenuState::getLocalBounds().left + UiMenuState::getSize().x / 2, start_y,
++            UiMenuState::getSize().x - (64 * ui->getScaling().x), UiMenuState::getSize().x / (STATES_COUNT + 1)
+     });
+     uiStateList->setOrigin(Origin::Top);
+-    UiStateMenu::add(uiStateList);
++    UiMenuState::add(uiStateList);
+ 
+-    auto tweenPosition = new TweenPosition(UiStateMenu::getPosition(),
+-                                           {UiStateMenu::getPosition().x, ui->getSize().y - UiStateMenu::getSize().y},
++    auto tweenPosition = new TweenPosition(UiMenuState::getPosition(),
++                                           {UiMenuState::getPosition().x, ui->getSize().y - UiMenuState::getSize().y},
+                                            0.2f);
+     tweenPosition->setState(TweenState::Stopped);
+-    UiStateMenu::add(tweenPosition);
++    UiMenuState::add(tweenPosition);
+ 
+-    UiStateMenu::setVisibility(Visibility::Hidden);
++    UiMenuState::setVisibility(Visibility::Hidden);
+ }
+ 
+-void UiStateMenu::setVisibility(c2d::Visibility visibility, bool tweenPlay) {
++void UiMenuState::setVisibility(c2d::Visibility visibility, bool tweenPlay) {
+     if (ui->getUiRomList() && ui->getUiRomList()->isVisible()) {
+         ui->getUiRomList()->getBlur()->setVisibility(visibility, true);
+     }
+@@ -217,7 +212,7 @@ void UiStateMenu::setVisibility(c2d::Visibility visibility, bool tweenPlay) {
+     RectangleShape::setVisibility(visibility, tweenPlay);
+ }
+ 
+-bool UiStateMenu::onInput(c2d::Input::Player *players) {
++bool UiMenuState::onInput(c2d::Input::Player *players) {
+     unsigned int buttons = players[0].buttons;
+ 
+     if (buttons & Input::Button::Left) {
+@@ -236,16 +231,16 @@ bool UiStateMenu::onInput(c2d::Input::Player *players) {
+                         state->bottom_text->getString(),
+                         "PRESS FIRE2 TO CANCEL", "LOAD", "SAVE");
+                 if (res == MessageBox::LEFT) {
+-                    state->load();
++                    state->loadState();
+                     setVisibility(Visibility::Hidden);
+                     ui->getUiEmu()->resume();
+                 } else if (res == MessageBox::RIGHT) {
+-                    state->save();
++                    state->saveState();
+                     setVisibility(Visibility::Hidden);
+                     ui->getUiEmu()->resume();
+                 }
+             } else {
+-                state->save();
++                state->saveState();
+                 setVisibility(Visibility::Hidden);
+                 ui->getUiEmu()->resume();
+             }
+@@ -254,9 +249,9 @@ bool UiStateMenu::onInput(c2d::Input::Player *players) {
+             if (game.available) {
+                 UiState *state = uiStateList->getSelection();
+                 if (state->exist) {
+-                    ui->getConfig()->load(game);
++                    ui->getConfig()->loadGame(game);
+                     ui->getUiEmu()->load(game);
+-                    state->load();
++                    state->loadState();
+                     setVisibility(Visibility::Hidden);
+                     return true;
+                 }
+diff --git a/ui/c2dui_ui_menu_state.h b/src/skeleton/ui_menu_state.h
+similarity index 85%
+rename from ui/c2dui_ui_menu_state.h
+rename to src/skeleton/ui_menu_state.h
+index 27f937a..eeb6781 100644
+--- a/ui/c2dui_ui_menu_state.h
++++ b/src/skeleton/ui_menu_state.h
+@@ -7,13 +7,13 @@
+ 
+ class UiStateList;
+ 
+-namespace c2dui {
++namespace pemu {
+ 
+-    class UiStateMenu : public SkinnedRectangle {
++    class UiMenuState : public SkinnedRectangle {
+ 
+     public:
+ 
+-        explicit UiStateMenu(UiMain *ui);
++        explicit UiMenuState(UiMain *ui);
+ 
+         void setVisibility(c2d::Visibility visibility, bool tweenPlay = false) override;
+ 
+diff --git a/ui/c2dui_ui_progressbox.cpp b/src/skeleton/ui_progressbox.cpp
+similarity index 99%
+rename from ui/c2dui_ui_progressbox.cpp
+rename to src/skeleton/ui_progressbox.cpp
+index fb66d52..ea0b56f 100644
+--- a/ui/c2dui_ui_progressbox.cpp
++++ b/src/skeleton/ui_progressbox.cpp
+@@ -2,7 +2,7 @@
+ // Created by cpasjuste on 04/02/18.
+ //
+ 
+-#include "c2dui.h"
++#include "pemu.h"
+ 
+ UIProgressBox::UIProgressBox(UiMain *ui)
+         : SkinnedRectangle(ui, {"SKIN_CONFIG", "MESSAGEBOX"}) {
+diff --git a/ui/c2dui_ui_progressbox.h b/src/skeleton/ui_progressbox.h
+similarity index 97%
+rename from ui/c2dui_ui_progressbox.h
+rename to src/skeleton/ui_progressbox.h
+index b14cb98..3176d66 100644
+--- a/ui/c2dui_ui_progressbox.h
++++ b/src/skeleton/ui_progressbox.h
+@@ -5,7 +5,7 @@
+ #ifndef C2D_UI_PROGRESSBOX_H
+ #define C2D_UI_PROGRESSBOX_H
+ 
+-namespace c2dui {
++namespace pemu {
+ 
+     class UIProgressBox : public SkinnedRectangle {
+ 
+diff --git a/ui/c2dui_ui_romlist.cpp b/src/skeleton/ui_romlist.cpp
+similarity index 73%
+rename from ui/c2dui_ui_romlist.cpp
+rename to src/skeleton/ui_romlist.cpp
+index 92366d3..0e183fd 100644
+--- a/ui/c2dui_ui_romlist.cpp
++++ b/src/skeleton/ui_romlist.cpp
+@@ -2,11 +2,12 @@
+ // Created by cpasjuste on 22/11/16.
+ //
+ #include <algorithm>
+-#include "c2dui.h"
++#include "pemu.h"
+ #include "ss_api.h"
+ 
+ using namespace c2d;
+-using namespace c2dui;
++using namespace c2d::config;
++using namespace pemu;
+ using namespace ss_api;
+ 
+ UIRomList::UIRomList(UiMain *main, RomList *romList, const c2d::Vector2f &size)
+@@ -28,15 +29,15 @@ UIRomList::UIRomList(UiMain *main, RomList *romList, const c2d::Vector2f &size)
+     pRomInfo = new UIRomInfo(pMain, this, skin->getFont(), pMain->getFontSize());
+     UIRomList::add(pRomInfo);
+ 
+-    // add rom list title (system text)
+-    if (!(pMain->getConfig()->get(Option::Id::GUI_FILTER_SYSTEM)->getFlags() & Option::Flags::HIDDEN)) {
+-        pTitleText = new SkinnedText(pMain, {"SKIN_CONFIG", "MAIN", "ROM_LIST", "SYSTEM_TEXT"});
+-        if (pTitleText->available) {
+-            UIRomList::add(pTitleText);
+-        } else {
+-            delete (pTitleText);
+-        }
++    // add rom list title (system text + rom count)
++    pTitleText = new SkinnedText(pMain, {"SKIN_CONFIG", "MAIN", "ROM_LIST", "SYSTEM_TEXT"});
++    if (pTitleText->available) {
++        UIRomList::add(pTitleText);
++    } else {
++        delete (pTitleText);
+     }
++    mShowSystemText = !(pMain->getConfig()->getOption(PEMUConfig::OptId::UI_FILTER_SYSTEM)->getFlags()
++                        & PEMUConfig::Flags::HIDDEN);
+ 
+     // add rom listing ui
+     Skin::TextGroup textGroup = skin->getText({"SKIN_CONFIG", "MAIN", "ROM_LIST", "TEXT"});
+@@ -56,12 +57,8 @@ UIRomList::UIRomList(UiMain *main, RomList *romList, const c2d::Vector2f &size)
+ 
+     // add rom list ui
+     Skin::RectangleShapeGroup romListGroup = skin->getRectangleShape({"MAIN", "ROM_LIST"});
+-    bool use_icons = false;
+-#if !(defined(__PSP2__) || defined(__3DS__)) // two slow
+-    use_icons = pMain->getConfig()->get(Option::Id::GUI_SHOW_ICONS)->getValueBool();
+-#endif
+     pListBox = new UIListBox(pMain, skin->getFont(), (int) textGroup.size,
+-                             romListGroup.rect, mGameList.games, use_icons);
++                             romListGroup.rect, mGameList.games);
+     pListBox->colorMissing = colorMissing;
+     pListBox->colorAvailable = textGroup.color;
+     pListBox->setFillColor(romListGroup.color);
+@@ -86,33 +83,8 @@ UIRomList::UIRomList(UiMain *main, RomList *romList, const c2d::Vector2f &size)
+     pBlur->setVisibility(Visibility::Hidden);
+     UIRomList::add(pBlur);
+ 
+-    int delay = pMain->getConfig()->get(Option::Id::GUI_VIDEO_SNAP_DELAY)->getValueInt();
++    int delay = pMain->getConfig()->get(PEMUConfig::OptId::UI_VIDEO_SNAP_DELAY)->getInteger();
+     UIRomList::setVideoSnapDelay(delay);
+-
+-    // filter roms
+-    UIRomList::updateRomList();
+-}
+-
+-void UIRomList::updateRomList() {
+-    filterRomList();
+-    sortRomList();
+-
+-    if (pTitleText && pTitleText->available) {
+-        std::string sys = pMain->getConfig()->get(Option::Id::GUI_FILTER_SYSTEM)->getValueString();
+-        pTitleText->setString(sys);
+-    }
+-
+-    if (pListBox) {
+-        pListBox->setGames(mGameList.games);
+-    }
+-
+-    if (pRomInfo) {
+-        pRomInfo->load(Game());
+-        mTimerLoadInfoDone = 0;
+-        mTimerLoadInfo.restart();
+-        mTimerLoadVideoDone = 0;
+-        mTimerLoadVideo.restart();
+-    }
+ }
+ 
+ std::string UIRomList::getPreview(const Game &game, UIRomList::PreviewType type) {
+@@ -153,43 +125,71 @@ std::string UIRomList::getPreview(const Game &game, UIRomList::PreviewType type)
+         if (pMain->getIo()->getFile(path).isFile()) {
+             return path;
+         }
++        // try from filename
++        path = parent.romsPath + "media/" + mediaType + "/" + Utility::removeExt(parent.path) + mediaExt;
++        printf("getPreview(%s)\n", path.c_str());
++        if (pMain->getIo()->getFile(path).isFile()) {
++            return path;
++        }
+     }
+ 
+     return {};
+ }
+ 
++void UIRomList::updateRomList() {
++    filterRomList();
++    sortRomList();
++
++    std::string sys = pMain->getConfig()->get(PEMUConfig::OptId::UI_FILTER_SYSTEM)->getString();
++    int systemId = sys == "ALL" ? -1 : pRomList->gameList->systemList.findByName(sys).id;
++    if (mShowSystemText && pTitleText) {
++        pTitleText->setString(sys + " - " +
++                              std::to_string(mGameList.getAvailableCount()) + "/" +
++                              std::to_string(pRomList->gameList->getCount(systemId)));
++    } else if (pTitleText) {
++        pTitleText->setString(std::to_string(mGameList.getAvailableCount()) + "/" +
++                              std::to_string(pRomList->gameList->getCount(systemId)));
++    }
++
++    if (pListBox) {
++        pListBox->setGames(mGameList.games);
++    }
++
++    if (pRomInfo) {
++        pRomInfo->load(Game());
++        mTimerLoadInfoDone = 0;
++        mTimerLoadInfo.restart();
++        mTimerLoadVideoDone = 0;
++        mTimerLoadVideo.restart();
++    }
++}
++
+ void UIRomList::filterRomList() {
+-    ss_api::GameList *list = pMain->getConfig()->get(Option::Id::GUI_SHOW_FAVORITES)->getValueBool() ?
++    auto cfg = pMain->getConfig();
++    ss_api::GameList *list = cfg->get(PEMUConfig::OptId::UI_FILTER_FAVORITES)->getInteger() ?
+                              pRomList->gameListFav : pRomList->gameList;
+-    bool showClones = pMain->getConfig()->get(Option::Id::GUI_FILTER_CLONES)->getValueBool();
+-    std::string system = pMain->getConfig()->get(Option::Id::GUI_FILTER_SYSTEM)->getValueString();
+-    int systemId;
+-    // custom arcade system (mame sscrap id 75)
+-    if (system == "ARCADE") {
+-        systemId = 9999;
+-    } else {
+-        systemId = system == "ALL" ? -1 : list->systemList.findByName(system).id;
+-    }
+-    std::string editor = pMain->getConfig()->get(Option::Id::GUI_FILTER_EDITOR)->getValueString();
++    std::string system = cfg->get(PEMUConfig::OptId::UI_FILTER_SYSTEM)->getString();
++    int systemId = system == "ALL" ? -1 : list->systemList.findByName(system).id;
++    std::string editor = cfg->get(PEMUConfig::OptId::UI_FILTER_EDITOR)->getString();
+     int editorId = editor == "ALL" ? -1 : list->findEditorByName(editor).id;
+-    std::string dev = pMain->getConfig()->get(Option::Id::GUI_FILTER_DEVELOPER)->getValueString();
++    std::string dev = cfg->get(PEMUConfig::OptId::UI_FILTER_DEVELOPER)->getString();
+     int devId = dev == "ALL" ? -1 : list->findDeveloperByName(dev).id;
+-    int players = Utility::parseInt(pMain->getConfig()->get(Option::Id::GUI_FILTER_PLAYERS)->getValueString(), -1);
+-    int rating = Utility::parseInt(pMain->getConfig()->get(Option::Id::GUI_FILTER_RATING)->getValueString(), -1);
+-    int rotation = Utility::parseInt(pMain->getConfig()->get(Option::Id::GUI_FILTER_ROTATION)->getValueString(), -1);
+-    std::string genre = pMain->getConfig()->get(Option::Id::GUI_FILTER_GENRE)->getValueString();
++    int players = Utility::parseInt(cfg->get(PEMUConfig::OptId::UI_FILTER_PLAYERS)->getString(), -1);
++    int rating = Utility::parseInt(cfg->get(PEMUConfig::OptId::UI_FILTER_RATING)->getString(), -1);
++    std::string genre = cfg->get(PEMUConfig::OptId::UI_FILTER_GENRE)->getString();
+     int genreId = genre == "ALL" ? -1 : list->findGenreByName(genre).id;
+ 
++    //printf("UIRomList::filterRomList: system: %s (0x%08x)\n", system.c_str(), systemId);
+     mGameList = list->filter(
+-            false, showClones, systemId == 9999 ? -1 : systemId, systemId == 9999 ? 75 : -1,
+-            editorId, devId, players, rating, rotation, genreId,
+-            pMain->getConfig()->get(Option::Id::GUI_FILTER_RESOLUTION)->getValueString(),
+-            pMain->getConfig()->get(Option::Id::GUI_FILTER_DATE)->getValueString()
++            cfg->get(PEMUConfig::OptId::UI_FILTER_AVAILABLE)->getInteger(),
++            !cfg->get(PEMUConfig::OptId::UI_FILTER_CLONES)->getInteger(),
++            systemId, -1, editorId, devId, players, rating, -1, genreId, "ALL",
++            cfg->get(PEMUConfig::OptId::UI_FILTER_DATE)->getString()
+     );
+ }
+ 
+ void UIRomList::sortRomList() {
+-    bool byZipName = pMain->getConfig()->get(Option::Id::GUI_SHOW_ZIP_NAMES)->getValueBool();
++    bool byZipName = pMain->getConfig()->get(PEMUConfig::OptId::UI_SHOW_ZIP_NAMES)->getInteger();
+     mGameList.sortAlpha(byZipName);
+ }
+ 
+@@ -205,6 +205,10 @@ RomList *UIRomList::getRomList() {
+     return pRomList;
+ }
+ 
++void UIRomList::setGames(const std::vector<ss_api::Game> &games) {
++    pListBox->setGames(games);
++}
++
+ void UIRomList::setVisibility(c2d::Visibility visibility, bool tweenPlay) {
+     if (visibility == c2d::Visibility::Hidden) {
+         pRomInfo->load();
+@@ -253,7 +257,7 @@ bool UIRomList::onInput(c2d::Input::Player *players) {
+             pRomInfo->mpvTexture->setVisibility(c2d::Visibility::Hidden);
+             pRomInfo->mpv->stop();
+ #endif
+-            pMain->getConfig()->load(game);
++            pMain->getConfig()->loadGame(game);
+             pMain->getUiEmu()->load(game);
+             return true;
+         }
+@@ -271,7 +275,7 @@ bool UIRomList::onInput(c2d::Input::Player *players) {
+                     "FAVORITES", "Remove from favorites ?", "OK", "CANCEL");
+             if (res == MessageBox::LEFT) {
+                 pRomList->removeFav(game);
+-                if (pMain->getConfig()->get(Option::Id::GUI_SHOW_FAVORITES)->getValueBool()) {
++                if (pMain->getConfig()->get(PEMUConfig::OptId::UI_FILTER_FAVORITES)->getInteger()) {
+                     // update list if we are in favorites
+                     updateRomList();
+                 }
+@@ -286,19 +290,19 @@ bool UIRomList::onInput(c2d::Input::Player *players) {
+     }
+ 
+     // only allow system switch if skin contains romlist title
+-    if (pTitleText && pTitleText->available) {
++    if (pTitleText && mShowSystemText) {
+         if (buttons & Input::Button::LT) {
+-            Option *sysOpt = pMain->getConfig()->get(Option::Id::GUI_FILTER_SYSTEM);
+-            size_t sysCount = sysOpt->getValues()->size();
++            Option *sysOpt = pMain->getConfig()->get(PEMUConfig::OptId::UI_FILTER_SYSTEM);
++            size_t sysCount = sysOpt->getArray().size();
+             if (sysCount > 1) {
+-                sysOpt->prev();
++                sysOpt->setArrayMovePrev();
+                 updateRomList();
+             }
+         } else if (buttons & Input::Button::RT) {
+-            Option *sysOpt = pMain->getConfig()->get(Option::Id::GUI_FILTER_SYSTEM);
+-            size_t sysCount = sysOpt->getValues()->size();
++            Option *sysOpt = pMain->getConfig()->get(PEMUConfig::OptId::UI_FILTER_SYSTEM);
++            size_t sysCount = sysOpt->getArray().size();
+             if (sysCount > 1) {
+-                sysOpt->next();
++                sysOpt->setArrayMoveNext();
+                 updateRomList();
+             }
+         }
+diff --git a/ui/c2dui_ui_romlist.h b/src/skeleton/ui_romlist.h
+similarity index 92%
+rename from ui/c2dui_ui_romlist.h
+rename to src/skeleton/ui_romlist.h
+index 2851301..9676319 100644
+--- a/ui/c2dui_ui_romlist.h
++++ b/src/skeleton/ui_romlist.h
+@@ -7,7 +7,7 @@
+ 
+ class UIRomInfo;
+ 
+-namespace c2dui {
++namespace pemu {
+ 
+     class UIRomList : public SkinnedRectangle {
+ 
+@@ -37,6 +37,8 @@ namespace c2dui {
+ 
+         virtual void setVideoSnapDelay(int delay);
+ 
++        void setGames(const std::vector<ss_api::Game> &games);
++
+         void setVisibility(c2d::Visibility visibility, bool tweenPlay = false) override;
+ 
+     protected:
+@@ -52,6 +54,7 @@ namespace c2dui {
+         RectangleShape *pBlur = nullptr;
+         SkinnedText *pTitleText = nullptr;
+         ss_api::GameList mGameList;
++        bool mShowSystemText = false;
+ 
+         c2d::C2DClock mTimerLoadInfo;
+ #ifdef __3DS__
+diff --git a/ui/c2dui_ui_romlist_rominfo.cpp b/src/skeleton/ui_romlist_rominfo.cpp
+similarity index 93%
+rename from ui/c2dui_ui_romlist_rominfo.cpp
+rename to src/skeleton/ui_romlist_rominfo.cpp
+index 0f1a2f8..00ef7ce 100644
+--- a/ui/c2dui_ui_romlist_rominfo.cpp
++++ b/src/skeleton/ui_romlist_rominfo.cpp
+@@ -2,12 +2,11 @@
+ // Created by cpasjuste on 12/05/2020.
+ //
+ 
+-#include "c2dui.h"
++#include "pemu.h"
+ 
+ UIRomInfo::UIRomInfo(UiMain *u, UIRomList *uiRList, Font *fnt, int fntSize)
+         : Rectangle(u->getSize()) {
+     printf("UIRomInfo\n");
+-
+     main = u;
+     uiRomList = uiRList;
+     font = fnt;
+@@ -34,8 +33,6 @@ UIRomInfo::UIRomInfo(UiMain *u, UIRomList *uiRList, Font *fnt, int fntSize)
+         genreText = addInfoBoxText({"MAIN", "ROM_INFOS", "GENRE_TEXT"});
+         playersText = addInfoBoxText({"MAIN", "ROM_INFOS", "PLAYERS_TEXT"});
+         ratingText = addInfoBoxText({"MAIN", "ROM_INFOS", "RATING_TEXT"});
+-        rotationText = addInfoBoxText({"MAIN", "ROM_INFOS", "ROTATION_TEXT"});
+-        resolutionText = addInfoBoxText({"MAIN", "ROM_INFOS", "RESOLUTION_TEXT"});
+         cloneofText = addInfoBoxText({"MAIN", "ROM_INFOS", "CLONEOF_TEXT"});
+         filenameText = addInfoBoxText({"MAIN", "ROM_INFOS", "FILENAME_TEXT"});
+         Rectangle::add(infoBox);
+@@ -135,7 +132,6 @@ bool UIRomInfo::loadTexture(const Game &game) {
+ }
+ 
+ void UIRomInfo::load(const Game &game) {
+-
+     if (game.id <= 0) {
+         // try to load title/preview texture even if game is not in DB
+         loadTexture(game);
+@@ -146,8 +142,6 @@ void UIRomInfo::load(const Game &game) {
+         hideText(genreText);
+         hideText(playersText);
+         hideText(ratingText);
+-        hideText(rotationText);
+-        hideText(resolutionText);
+         hideText(cloneofText);
+         hideText(filenameText);
+         hideText(synoText);
+@@ -166,9 +160,6 @@ void UIRomInfo::load(const Game &game) {
+         showText(genreText, "Genre: " + game.genre.name);
+         showText(playersText, "Players: " + game.players);
+         showText(ratingText, "Rating: " + std::to_string(game.rating));
+-        showText(rotationText, "Rotation: " + std::to_string(game.rotation));
+-        showText(resolutionText,
+-                 "Resolution: " + (game.resolution.empty() ? "UNKNOWN" : game.resolution));
+         showText(cloneofText, "Clone Of: " + (game.cloneOf.empty() ? "NONE" : game.cloneOf));
+         showText(filenameText, "File: " + game.path);
+         showText(synoText, game.synopsis);
+diff --git a/ui/c2dui_ui_romlist_rominfo.h b/src/skeleton/ui_romlist_rominfo.h
+similarity index 74%
+rename from ui/c2dui_ui_romlist_rominfo.h
+rename to src/skeleton/ui_romlist_rominfo.h
+index edc9517..c3c49dc 100644
+--- a/ui/c2dui_ui_romlist_rominfo.h
++++ b/src/skeleton/ui_romlist_rominfo.h
+@@ -2,16 +2,16 @@
+ // Created by cpasjuste on 12/05/2020.
+ //
+ 
+-#ifndef PEMU_C2DUI_UI_ROMLIST_ROMINFO_H
+-#define PEMU_C2DUI_UI_ROMLIST_ROMINFO_H
++#ifndef PEMU_UI_ROMLIST_ROMINFO_H
++#define PEMU_UI_ROMLIST_ROMINFO_H
+ 
+-#include "c2dui.h"
++#include "pemu.h"
+ 
+ class UIRomInfo : public c2d::Rectangle {
+ 
+ public:
+ 
+-    UIRomInfo(c2dui::UiMain *u, c2dui::UIRomList *uiRList, c2d::Font *fnt, int fntSize);
++    UIRomInfo(pemu::UiMain *u, pemu::UIRomList *uiRList, c2d::Font *fnt, int fntSize);
+ 
+     ~UIRomInfo() override;
+ 
+@@ -27,8 +27,8 @@ public:
+ 
+     void load(const ss_api::Game &game = ss_api::Game());
+ 
+-    c2dui::UiMain *main = nullptr;
+-    c2dui::UIRomList *uiRomList = nullptr;
++    pemu::UiMain *main = nullptr;
++    pemu::UIRomList *uiRomList = nullptr;
+     c2d::C2DTexture *texture = nullptr;
+     c2d::Font *font;
+     int fontSize;
+@@ -46,8 +46,6 @@ public:
+     c2d::Text *genreText = nullptr;
+     c2d::Text *playersText = nullptr;
+     c2d::Text *ratingText = nullptr;
+-    c2d::Text *rotationText = nullptr;
+-    c2d::Text *resolutionText = nullptr;
+     c2d::Text *cloneofText = nullptr;
+     c2d::Text *filenameText = nullptr;
+ #ifdef __MPV__
+@@ -56,4 +54,4 @@ public:
+ #endif
+ };
+ 
+-#endif //PEMU_C2DUI_UI_ROMLIST_ROMINFO_H
++#endif //PEMU_UI_ROMLIST_ROMINFO_H
+diff --git a/ui/c2dui_status_box.cpp b/src/skeleton/ui_status_box.cpp
+similarity index 98%
+rename from ui/c2dui_status_box.cpp
+rename to src/skeleton/ui_status_box.cpp
+index dce0465..23f2e33 100644
+--- a/ui/c2dui_status_box.cpp
++++ b/src/skeleton/ui_status_box.cpp
+@@ -2,7 +2,7 @@
+ // Created by cpasjuste on 08/12/18.
+ //
+ 
+-#include "c2dui.h"
++#include "pemu.h"
+ 
+ UiStatusBox::UiStatusBox(UiMain *m)
+         : SkinnedRectangle(m, {"SKIN_CONFIG", "STATUSBOX"}) {
+diff --git a/ui/c2dui_status_box.h b/src/skeleton/ui_status_box.h
+similarity index 97%
+rename from ui/c2dui_status_box.h
+rename to src/skeleton/ui_status_box.h
+index b82cf65..aed572a 100644
+--- a/ui/c2dui_status_box.h
++++ b/src/skeleton/ui_status_box.h
+@@ -5,7 +5,7 @@
+ #ifndef C2DUI_STATUS_BOX_H
+ #define C2DUI_STATUS_BOX_H
+ 
+-namespace c2dui {
++namespace pemu {
+ 
+     class UiStatusBox : public SkinnedRectangle {
+ 
+diff --git a/ui/c2dui_video.cpp b/src/skeleton/ui_video.cpp
+similarity index 77%
+rename from ui/c2dui_video.cpp
+rename to src/skeleton/ui_video.cpp
+index 065f797..4db66dc 100644
+--- a/ui/c2dui_video.cpp
++++ b/src/skeleton/ui_video.cpp
+@@ -2,11 +2,11 @@
+ // Created by cpasjuste on 01/12/16.
+ //
+ 
+-#include "c2dui.h"
++#include "pemu.h"
+ 
+ C2DUIVideo::C2DUIVideo(UiMain *u, uint8_t **_pixels, int *_pitch,
+                        const c2d::Vector2i &size, const c2d::Vector2i &a, Texture::Format format)
+-        : C2DTexture(size, format) {
++    : C2DTexture(size, format) {
+     ui = u;
+     aspect = a;
+ 
+@@ -16,18 +16,17 @@ C2DUIVideo::C2DUIVideo(UiMain *u, uint8_t **_pixels, int *_pitch,
+     }
+ }
+ 
+-void C2DUIVideo::updateScaling(bool vertical, bool flip) {
++void C2DUIVideo::updateScaling(const bool vertical, const bool flip) {
+     bool rotated = false;
+     float rotation = 0;
+     int rotation_cfg = 0;
+-    std::string scale_value = ui->getConfig()->get(Option::Id::ROM_SCALING, true)->getValueString();
+-    float scale_value_float = (float) ui->getConfig()->get(Option::Id::ROM_SCALING, true)->getIndex() + 1;
+-    std::string scaling_mode = ui->getConfig()->get(Option::Id::ROM_SCALING_MODE, true)->getValueString();
+-    float game_aspect_ratio = vertical ? (float) aspect.y / (float) aspect.x
+-                                       : (float) aspect.x / (float) aspect.y;
+-    Option *rotationOpt = ui->getConfig()->get(Option::Id::ROM_ROTATION, true);
++    std::string scale_value = ui->getConfig()->get(PEMUConfig::OptId::EMU_SCALING, true)->getString();
++    float scale_value_float = (float) ui->getConfig()->get(PEMUConfig::OptId::EMU_SCALING, true)->getArrayIndex() + 1;
++    std::string scaling_mode = ui->getConfig()->get(PEMUConfig::OptId::EMU_SCALING_MODE, true)->getString();
++    float game_aspect_ratio = vertical ? (float) aspect.y / (float) aspect.x : (float) aspect.x / (float) aspect.y;
++    c2d::config::Option *rotationOpt = ui->getConfig()->get(PEMUConfig::OptId::EMU_ROTATION, true);
+     if (rotationOpt) {
+-        rotation_cfg = rotationOpt->getIndex();
++        rotation_cfg = rotationOpt->getArrayIndex();
+     }
+ 
+     Vector2f screen = ui->getSize();
+@@ -65,8 +64,7 @@ void C2DUIVideo::updateScaling(bool vertical, bool flip) {
+         scale.y = rotated ? scale_max.x : scale_max.y;
+     } else {
+         if (!rotated) {
+-            // scale_value_float 4 == FIT
+-            scale.y = scale_value_float == 4 ? scale_max.y : std::min(scale_max.y, scale_value_float);
++            scale.y = scale_value == "FIT" ? scale_max.y : std::min(scale_max.y, scale_value_float);
+             float size_x = ((float) getTextureRect().height * scale.y) * game_aspect_ratio;
+             if (scaling_mode == "AUTO") {
+                 scale.x = size_x / (float) getTextureRect().width;
+@@ -81,8 +79,7 @@ void C2DUIVideo::updateScaling(bool vertical, bool flip) {
+                 scale.x = scale.y;
+             }
+         } else {
+-            // scale_value_float 4 == FIT
+-            scale.x = scale_value_float == 4 ? scale_max.y : std::min(scale_max.y, scale_value_float);
++            scale.x = scale_value == "FIT" ? scale_max.y : std::min(scale_max.y, scale_value_float);
+             float size_y = ((float) getTextureRect().width * scale.x) / game_aspect_ratio;
+             if (scaling_mode == "AUTO") {
+                 scale.y = size_y / (float) getTextureRect().height;
+diff --git a/ui/c2dui_video.h b/src/skeleton/ui_video.h
+similarity index 96%
+rename from ui/c2dui_video.h
+rename to src/skeleton/ui_video.h
+index 0b6de5e..71c2939 100644
+--- a/ui/c2dui_video.h
++++ b/src/skeleton/ui_video.h
+@@ -5,7 +5,7 @@
+ #ifndef C2DUI_VIDEO_H_
+ #define C2DUI_VIDEO_H_
+ 
+-namespace c2dui {
++namespace pemu {
+ 
+     class C2DUIVideo : public c2d::C2DTexture {
+ 
+diff --git a/ui/c2dui.h b/ui/c2dui.h
+deleted file mode 100644
+index a28da2d..0000000
+--- a/ui/c2dui.h
++++ /dev/null
+@@ -1,43 +0,0 @@
+-//
+-// Created by cpasjuste on 28/05/18.
+-//
+-
+-#ifndef C2DUI_H
+-#define C2DUI_H
+-
+-#include "ss_api.h"
+-#include "cross2d/c2d.h"
+-
+-#ifdef __MPV__
+-
+-#include "mpv.h"
+-#include "mpv_texture.h"
+-
+-#endif
+-
+-#include "c2dui_option.h"
+-#include "c2dui_romlist.h"
+-#include "c2dui_skin.h"
+-#include "c2dui_video.h"
+-#include "c2dui_config.h"
+-
+-#include "skin/SkinnedRectangle.h"
+-#include "skin/SkinnedText.h"
+-
+-#include "c2dui_ui_listbox.h"
+-#include "c2dui_ui_highlight.h"
+-#include "c2dui_ui_menu.h"
+-#include "c2dui_ui_emu.h"
+-#include "c2dui_ui_romlist.h"
+-#include "c2dui_ui_romlist_rominfo.h"
+-#include "c2dui_ui_progressbox.h"
+-#include "c2dui_ui_menu_state.h"
+-#include "c2dui_status_box.h"
+-#include "c2dui_ui_main.h"
+-#include "c2dui_ui_help.h"
+-
+-using namespace c2d;
+-using namespace c2dui;
+-using namespace ss_api;
+-
+-#endif //C2DUI_H
+diff --git a/ui/c2dui_config.cpp b/ui/c2dui_config.cpp
+deleted file mode 100644
+index 9b9e331..0000000
+--- a/ui/c2dui_config.cpp
++++ /dev/null
+@@ -1,517 +0,0 @@
+-//
+-// Created by cpasjuste on 05/12/16.
+-//
+-
+-#include "c2dui.h"
+-
+-Config::Config(UiMain *ui, int ver, const std::string &defaultRomsPath) {
+-    m_ui = ui;
+-    dataPath = m_ui->getIo()->getDataPath();
+-    configPath = dataPath + "config.cfg";
+-    version = ver;
+-
+-    printf("Config(%s, v%i)\n", configPath.c_str(), ver);
+-
+-    /// custom screens size
+-    int joyDeadZoneIndex = 3;
+-    std::string device = C2DDevice::getName();
+-    if (device == "pocket2") {
+-        joyDeadZoneIndex = 11;
+-    }
+-
+-    /// add default roms paths
+-    roms_paths.clear();
+-    roms_paths.emplace_back(m_ui->getIo()->getDataPath() + defaultRomsPath);
+-
+-    /// default options available for all cores
+-    /////////////////////////////////////////////////
+-    /// main/gui config
+-    /////////////////////////////////////////////////
+-    append("MAIN", {"MAIN"}, 0, Option::Id::MENU_MAIN, Option::Flags::MENU);
+-    append("SHOW_FAVORITES", {"OFF", "ON"}, 0, Option::Id::GUI_SHOW_FAVORITES,
+-           Option::Flags::BOOLEAN);
+-    append("SHOW_AVAILABLE", {"OFF", "ON"}, 0, Option::Id::GUI_SHOW_AVAILABLE,
+-           Option::Flags::BOOLEAN);
+-    get()->at(get()->size() - 1).setInfo(
+-            "YOU NEED TO RESTART THE APPLICATION AFTER CHANGING THIS OPTION");
+-    append("SHOW_CLONES", {"OFF", "ON"}, 0,
+-           Option::Id::GUI_FILTER_CLONES, Option::Flags::BOOLEAN | Option::Flags::HIDDEN);
+-    append("SHOW_ZIP_NAMES", {"OFF", "ON"}, 1, Option::Id::GUI_SHOW_ZIP_NAMES,
+-           Option::Flags::BOOLEAN);
+-    append("SHOW_ICONS", {"OFF", "ON"}, 0, Option::Id::GUI_SHOW_ICONS,
+-           Option::Flags::BOOLEAN | Option::Flags::HIDDEN);
+-    get()->at(get()->size() - 1).setInfo(
+-            "YOU NEED TO RESTART THE APPLICATION AFTER CHANGING THIS OPTION");
+-#if 0 // TODO
+-    append("SCREEN_WIDTH", (int) C2DDevice::getResolution().x, Option::Id::GUI_SCREEN_WIDTH,
+-           Option::Flags::INTEGER | Option::Flags::HIDDEN);
+-    append("SCREEN_HEIGHT", (int) C2DDevice::getResolution().y, Option::Id::GUI_SCREEN_HEIGHT,
+-           Option::Flags::INTEGER | Option::Flags::HIDDEN);
+-#endif
+-#ifdef __FULLSCREEN__
+-    append("FULLSCREEN", {"OFF", "ON"}, 0, Option::Id::GUI_FULLSCREEN, Option::Flags::BOOLEAN);
+-    get()->at(get()->size() - 1).setInfo("YOU NEED TO RESTART THE APPLICATION AFTER CHANGING THIS OPTION");
+-#endif
+-
+-    // build  skin list
+-    std::vector<std::string> skins;
+-    // add default skins from romfs
+-    skins.emplace_back("default");
+-    // add skins from romfs dir
+-    auto files = m_ui->getIo()->getDirList(m_ui->getIo()->getRomFsPath() + "skins/", true);
+-    for (auto &file: files) {
+-        if (file.type != c2d::Io::Type::Directory || file.name[0] == '.') {
+-            continue;
+-        }
+-        // only append skin if it doesn't exist yet
+-        if (std::find(skins.begin(), skins.end(), file.name) == skins.end()) {
+-            skins.emplace_back(file.name);
+-            printf("skin found: %s\n", file.path.c_str());
+-        }
+-    }
+-    // add skins from data dir
+-    files = m_ui->getIo()->getDirList(dataPath + "skins/", true);
+-    for (auto &file: files) {
+-        if (file.type != c2d::Io::Type::Directory || file.name[0] == '.') {
+-            continue;
+-        }
+-        // only append skin name if it
+-        if (std::find(skins.begin(), skins.end(), file.name) == skins.end()) {
+-            skins.emplace_back(file.name);
+-            printf("skin found: %s\n", file.path.c_str());
+-        }
+-    }
+-    // set "default" skin index
+-    if (!get(Option::Id::GUI_SKIN)) {
+-        int index = 0;
+-        for (size_t i = 0; i < skins.size(); i++) {
+-            if (skins.at(i) == "default") {
+-                index = (int) i;
+-            }
+-        }
+-        append("SKIN", skins, index, Option::Id::GUI_SKIN, Option::Flags::STRING);
+-    }
+-    get()->at(get()->size() - 1).setInfo(
+-            "YOU NEED TO RESTART THE APPLICATION AFTER CHANGING THIS OPTION");
+-
+-    int aspect_index = ui->getSize().x / ui->getSize().y > 1.33 ? 0 : 1;
+-    append("SKIN_ASPECT", {"16/9", "4/3"},
+-           aspect_index, Option::Id::GUI_SKIN_ASPECT, Option::Flags::STRING);
+-    get()->at(get()->size() - 1).setInfo(
+-            "YOU NEED TO RESTART THE APPLICATION AFTER CHANGING THIS OPTION");
+-
+-    append("FONT_SCALING", {"0", "1", "2", "3", "4", "5"},
+-           0, Option::Id::GUI_FONT_SCALING, Option::Flags::STRING);
+-    get()->at(get()->size() - 1).setInfo(
+-            "YOU NEED TO RESTART THE APPLICATION AFTER CHANGING THIS OPTION");
+-
+-    append("VIDEO_SNAP_DELAY", {"3", "5", "7", "10"}, 1,
+-           Option::Id::GUI_VIDEO_SNAP_DELAY, Option::Flags::STRING);
+-
+-    /////////////////////////////////////////////////
+-    /// default rom config
+-    /////////////////////////////////////////////////
+-    append("EMULATION", {"EMULATION"}, 0, Option::Id::MENU_ROM_OPTIONS, Option::Flags::MENU);
+-    if (m_ui->getSize().y > 1080) {
+-        append("SCALING", {"NONE", "2X", "3X", "4X", "5", "6", "7", "8", "9", "FIT", "FULL"},
+-               6, Option::Id::ROM_SCALING, Option::Flags::STRING);
+-    } else if (m_ui->getSize().y > 720) {
+-        append("SCALING", {"NONE", "2X", "3X", "4X", "FIT", "FULL"},
+-               4, Option::Id::ROM_SCALING, Option::Flags::STRING);
+-    } else if (m_ui->getSize().y > 544) {
+-        append("SCALING", {"NONE", "2X", "3X", "FIT", "FULL"},
+-               3, Option::Id::ROM_SCALING, Option::Flags::STRING);
+-    } else if (m_ui->getSize().y > 240) {
+-        append("SCALING", {"NONE", "2X", "FIT", "FULL"},
+-               2, Option::Id::ROM_SCALING, Option::Flags::STRING);
+-    } else {
+-        append("SCALING", {"NONE", "FIT", "FULL"},
+-               1, Option::Id::ROM_SCALING, Option::Flags::STRING);
+-    }
+-    append("SCALING_MODE", {"AUTO", "ASPECT", "INTEGER"}, 1,
+-           Option::Id::ROM_SCALING_MODE, Option::Flags::STRING);
+-    append("FILTER", {"POINT", "LINEAR"}, 0, Option::Id::ROM_FILTER, Option::Flags::STRING);
+-#ifdef __VITA__
+-    append("WAIT_RENDERING", {"OFF", "ON"}, 1, Option::Id::ROM_WAIT_RENDERING, Option::Flags::BOOLEAN);
+-#endif
+-    append("SHOW_FPS", {"OFF", "ON"}, 0, Option::Id::ROM_SHOW_FPS, Option::Flags::BOOLEAN);
+-
+-    /// joysticks config
+-    append("JOYPAD", {"JOYPAD"}, 0, Option::Id::MENU_JOYPAD, Option::Flags::MENU);
+-    append("JOY_UP", KEY_JOY_UP_DEFAULT, Option::Id::JOY_UP, Option::Flags::INPUT);
+-    append("JOY_DOWN", KEY_JOY_DOWN_DEFAULT, Option::Id::JOY_DOWN, Option::Flags::INPUT);
+-    append("JOY_LEFT", KEY_JOY_LEFT_DEFAULT, Option::Id::JOY_LEFT, Option::Flags::INPUT);
+-    append("JOY_RIGHT", KEY_JOY_RIGHT_DEFAULT, Option::Id::JOY_RIGHT, Option::Flags::INPUT);
+-    append("JOY_A", KEY_JOY_A_DEFAULT, Option::Id::JOY_A, Option::Flags::INPUT);
+-    append("JOY_B", KEY_JOY_B_DEFAULT, Option::Id::JOY_B, Option::Flags::INPUT);
+-    append("JOY_X", KEY_JOY_X_DEFAULT, Option::Id::JOY_X, Option::Flags::INPUT);
+-    append("JOY_Y", KEY_JOY_Y_DEFAULT, Option::Id::JOY_Y, Option::Flags::INPUT);
+-    append("JOY_LT", KEY_JOY_LT_DEFAULT, Option::Id::JOY_LT, Option::Flags::INPUT);
+-    append("JOY_RT", KEY_JOY_RT_DEFAULT, Option::Id::JOY_RT, Option::Flags::INPUT);
+-    append("JOY_LB", KEY_JOY_LB_DEFAULT, Option::Id::JOY_LB, Option::Flags::INPUT);
+-    append("JOY_RB", KEY_JOY_RB_DEFAULT, Option::Id::JOY_RB, Option::Flags::INPUT);
+-    append("JOY_SELECT", KEY_JOY_SELECT_DEFAULT, Option::Id::JOY_SELECT, Option::Flags::INPUT);
+-    append("JOY_START", KEY_JOY_START_DEFAULT, Option::Id::JOY_START, Option::Flags::INPUT);
+-    append("JOY_MENU1", KEY_JOY_MENU1_DEFAULT, Option::Id::JOY_MENU1, Option::Flags::INPUT);
+-    append("JOY_MENU2", KEY_JOY_MENU2_DEFAULT, Option::Id::JOY_MENU2, Option::Flags::INPUT);
+-    // TODO: add gui option for axis in option menu
+-    append("JOY_AXIS_LX", KEY_JOY_AXIS_LX, Option::Id::JOY_AXIS_LX,
+-           Option::Flags::INPUT | Option::Flags::HIDDEN);
+-    append("JOY_AXIS_LY", KEY_JOY_AXIS_LY, Option::Id::JOY_AXIS_LY,
+-           Option::Flags::INPUT | Option::Flags::HIDDEN);
+-    append("JOY_AXIS_RX", KEY_JOY_AXIS_RX, Option::Id::JOY_AXIS_RX,
+-           Option::Flags::INPUT | Option::Flags::HIDDEN);
+-    append("JOY_AXIS_RY", KEY_JOY_AXIS_RY, Option::Id::JOY_AXIS_RY,
+-           Option::Flags::INPUT | Option::Flags::HIDDEN);
+-    append("JOY_DEADZONE",
+-           {"2000", "4000", "6000", "8000", "10000", "12000", "14000", "16000",
+-            "18000", "20000", "22000", "24000", "26000", "28000", "30000"}, joyDeadZoneIndex,
+-           Option::Id::JOY_DEADZONE, Option::Flags::STRING);
+-#ifndef NO_KEYBOARD
+-    // keyboard
+-    append("KEYBOARD", {"KEYBOARD"}, 0, Option::Id::MENU_KEYBOARD, Option::Flags::MENU);
+-    append("KEY_UP", KEY_KB_UP_DEFAULT, Option::Id::KEY_UP, Option::Flags::INPUT);
+-    append("KEY_DOWN", KEY_KB_DOWN_DEFAULT, Option::Id::KEY_DOWN, Option::Flags::INPUT);
+-    append("KEY_LEFT", KEY_KB_LEFT_DEFAULT, Option::Id::KEY_LEFT, Option::Flags::INPUT);
+-    append("KEY_RIGHT", KEY_KB_RIGHT_DEFAULT, Option::Id::KEY_RIGHT, Option::Flags::INPUT);
+-    append("KEY_A", KEY_KB_A_DEFAULT, Option::Id::KEY_A, Option::Flags::INPUT);
+-    append("KEY_B", KEY_KB_B_DEFAULT, Option::Id::KEY_B, Option::Flags::INPUT);
+-    append("KEY_X", KEY_KB_X_DEFAULT, Option::Id::KEY_X, Option::Flags::INPUT);
+-    append("KEY_Y", KEY_KB_Y_DEFAULT, Option::Id::KEY_Y, Option::Flags::INPUT);
+-    append("KEY_LT", KEY_KB_LT_DEFAULT, Option::Id::KEY_LT, Option::Flags::INPUT);
+-    append("KEY_RT", KEY_KB_RT_DEFAULT, Option::Id::KEY_RT, Option::Flags::INPUT);
+-    append("KEY_LB", KEY_KB_LB_DEFAULT, Option::Id::KEY_LB, Option::Flags::INPUT);
+-    append("KEY_RB", KEY_KB_RB_DEFAULT, Option::Id::KEY_RB, Option::Flags::INPUT);
+-    append("KEY_SELECT", KEY_KB_SELECT_DEFAULT, Option::Id::KEY_SELECT, Option::Flags::INPUT);
+-    append("KEY_START", KEY_KB_START_DEFAULT, Option::Id::KEY_START, Option::Flags::INPUT);
+-    append("KEY_MENU1", KEY_KB_MENU1_DEFAULT, Option::Id::KEY_MENU1, Option::Flags::INPUT);
+-    append("KEY_MENU2", KEY_KB_MENU2_DEFAULT, Option::Id::KEY_MENU2, Option::Flags::INPUT);
+-#endif
+-}
+-
+-void Config::load(const ss_api::Game &game) {
+-    config_t cfg;
+-    config_init(&cfg);
+-
+-    bool isRomCfg = game.id > 0;
+-    std::vector<Option> *options = isRomCfg ? &options_rom : &options_gui;
+-    std::string path = configPath;
+-    if (isRomCfg) {
+-        path = dataPath;
+-        path += "configs/";
+-        path += Utility::removeExt(game.path);
+-        path += ".cfg";
+-    }
+-
+-    printf("Config::load: %s ...", path.c_str());
+-
+-    if (config_read_file(&cfg, path.c_str()) == CONFIG_TRUE) {
+-
+-        config_setting_t *settings_root = config_lookup(&cfg, "CONFIG");
+-        if (settings_root != nullptr) {
+-            printf("OK\n");
+-#ifdef __UPDATE_CONFIG__
+-            // verify cfg version
+-            int cfg_version = 0;
+-            if ((config_setting_lookup_int(settings_root, "VERSION", &cfg_version) == 0)
+-                || cfg_version != version) {
+-                // update cfg to newer version
+-                printf("CONFIG VERSION (%i) != EXE VERSION (%i)\n", cfg_version, version);
+-                save(game);
+-                config_destroy(&cfg);
+-                return;
+-            }
+-#endif
+-            config_setting_t *settings = nullptr;
+-            if (!isRomCfg) {
+-                settings = config_setting_lookup(settings_root, "ROMS_PATHS");
+-                if (settings != nullptr) {
+-                    char p[MAX_PATH];
+-                    for (size_t i = 0; i < roms_paths.size(); i++) {
+-                        memset(p, 0, MAX_PATH);
+-                        snprintf(p, MAX_PATH, "ROMS_PATH%i", (int) i);
+-                        const char *value = nullptr;
+-                        if (config_setting_lookup_string(settings, p, &value) != 0) {
+-                            if (m_ui->getIo()->exist(value)) {
+-                                roms_paths[i] = value;
+-                                if (!roms_paths[i].empty() && roms_paths[i].back() != '/') {
+-                                    roms_paths[i] += '/';
+-                                }
+-                            }
+-                            printf("%s: %s\n", p, roms_paths[i].c_str());
+-                        }
+-                    }
+-                }
+-            }
+-
+-            for (auto &option: *options) {
+-                unsigned int flags = option.getFlags();
+-                if (flags & Option::Flags::MENU) {
+-                    settings = config_setting_lookup(settings_root, option.getName().c_str());
+-                }
+-                if (settings != nullptr) {
+-                    if (flags & Option::Flags::INTEGER || flags & Option::Flags::INPUT) {
+-                        int value = 0;
+-                        if (config_setting_lookup_int(settings, option.getName().c_str(), &value) !=
+-                            0) {
+-                            option.setValueInt(value);
+-                            //printf("Config::load: OPTION: %s, VALUE: %i\n", option.getName().c_str(),
+-                            //       option.getValueInt());
+-                        }
+-                    } else {
+-                        const char *value;
+-                        if (config_setting_lookup_string(settings, option.getName().c_str(),
+-                                                         &value) != 0) {
+-                            option.setValueString(value);
+-                            //printf("Config::load: OPTION: %s, VALUE: %s\n", option.getName().c_str(),
+-                            //       option.getValueString().c_str());
+-                        }
+-                    }
+-                }
+-            }
+-        } else {
+-            printf("NOK: root configuration not found\n");
+-            save(game);
+-            config_destroy(&cfg);
+-            return;
+-        }
+-    } else {
+-        printf("NOK: file not found\n");
+-        // reset default rom options for other roms usage
+-        reset();
+-        // no need to save default rom config
+-        if (!isRomCfg) {
+-            save(ss_api::Game());
+-        }
+-    }
+-
+-    config_destroy(&cfg);
+-}
+-
+-void Config::save(const ss_api::Game &game) {
+-    config_t cfg{};
+-    config_init(&cfg);
+-
+-    bool isRomCfg = game.id > 0;
+-    std::vector<Option> *options = isRomCfg ? &options_rom : &options_gui;
+-    std::string path = configPath;
+-    if (isRomCfg) {
+-        path = dataPath;
+-        path += "configs/";
+-        path += Utility::removeExt(game.path);
+-        path += ".cfg";
+-    }
+-
+-    printf("Config::save: %s\n", path.c_str());
+-
+-    // create root
+-    config_setting_t *setting_root = config_root_setting(&cfg);
+-
+-    // create main group
+-    config_setting_t *setting_fba = config_setting_add(setting_root, "CONFIG", CONFIG_TYPE_GROUP);
+-    // add version
+-    config_setting_t *setting_cfg = config_setting_add(setting_fba, "VERSION", CONFIG_TYPE_INT);
+-    config_setting_set_int(setting_cfg, version);
+-
+-    config_setting_t *sub_setting = nullptr;
+-
+-    if (!isRomCfg) {
+-        sub_setting = config_setting_add(setting_fba, "ROMS_PATHS", CONFIG_TYPE_GROUP);
+-        for (unsigned int i = 0; i < roms_paths.size(); i++) {
+-            char p[MAX_PATH];
+-            snprintf(p, MAX_PATH, "ROMS_PATH%i", i);
+-            config_setting_t *setting = config_setting_add(sub_setting, p, CONFIG_TYPE_STRING);
+-            config_setting_set_string(setting, roms_paths[i].c_str());
+-        }
+-    }
+-
+-    for (auto &option: *options) {
+-        unsigned int flags = option.getFlags();
+-        if (flags & Option::Flags::MENU) {
+-            sub_setting = config_setting_add(setting_fba, option.getName().c_str(),
+-                                             CONFIG_TYPE_GROUP);
+-            continue;
+-        }
+-
+-        if (flags & Option::Flags::INTEGER || flags & Option::Flags::INPUT) {
+-            config_setting_t *setting = config_setting_add(sub_setting, option.getName().c_str(),
+-                                                           CONFIG_TYPE_INT);
+-            config_setting_set_int(setting, option.getValueInt());
+-        } else {
+-            config_setting_t *setting = config_setting_add(sub_setting, option.getName().c_str(),
+-                                                           CONFIG_TYPE_STRING);
+-            config_setting_set_string(setting, option.getValueString().c_str());
+-        }
+-    }
+-
+-    config_write_file(&cfg, path.c_str());
+-    config_destroy(&cfg);
+-}
+-
+-void Config::reset() {
+-    options_rom.clear();
+-
+-    size_t start = 0, end = options_gui.size();
+-    for (size_t i = 0; i < options_gui.size(); i++) {
+-        if (options_gui[i].getId() == Option::Id::MENU_ROM_OPTIONS) {
+-            start = i;
+-            break;
+-        }
+-    }
+-
+-    for (size_t i = start; i < end; i++) {
+-        options_rom.emplace_back(options_gui[i]);
+-    }
+-}
+-
+-std::string Config::getConfigPath() {
+-    return configPath;
+-}
+-
+-std::string Config::getRomPath(int n) {
+-    if ((size_t) n >= roms_paths.size()) {
+-        return roms_paths.at(0);
+-    } else {
+-        return roms_paths.at(n);
+-    }
+-}
+-
+-std::vector<std::string> Config::getRomPaths() {
+-    return roms_paths;
+-}
+-
+-std::vector<Option> *Config::get(bool isRom) {
+-    return isRom ? &options_rom : &options_gui;
+-}
+-
+-Option *Config::get(int index, bool isRom) {
+-    std::vector<Option> *options = get(isRom);
+-
+-    for (auto &option: *options) {
+-        if (option.getId() == index) {
+-            return &option;
+-        }
+-    }
+-    return nullptr;
+-}
+-
+-bool Config::add(int target, const std::string &text, const std::vector<std::string> &values,
+-                 int defaultValue, int index, unsigned int flags) {
+-    for (unsigned int i = 0; i < options_gui.size(); i++) {
+-        if (options_gui[i].getId() == target) {
+-            options_gui.insert(options_gui.begin() + i + 1,
+-                               Option(text, values, defaultValue, index, flags));
+-            return true;
+-        }
+-    }
+-
+-    return false;
+-}
+-
+-void Config::append(const std::string &text, const std::vector<std::string> &values,
+-                    int defaultValue, int id, unsigned int flags) {
+-    options_gui.emplace_back(text, values, defaultValue, id, flags);
+-}
+-
+-void Config::append(const std::string &text, int value, int id, unsigned int flags) {
+-    append(text, {std::to_string(value)}, 0, id, flags);
+-}
+-
+-bool Config::hide(int index, bool isRom) {
+-    std::vector<Option> *options = get(isRom);
+-
+-    for (auto &option: *options) {
+-        if (option.getId() == index) {
+-            unsigned int flags = option.getFlags();
+-            flags |= Option::HIDDEN;
+-            option.setFlags(flags);
+-            return true;
+-        }
+-    }
+-
+-    return false;
+-}
+-
+-std::vector<c2d::Input::ButtonMapping> Config::getKeyboardMapping(int player, bool isRom) {
+-#ifndef NO_KEYBOARD
+-    return {
+-            {Input::Button::Up,     get(Option::Id::KEY_UP, isRom)->getValueInt()},
+-            {Input::Button::Down,   get(Option::Id::KEY_DOWN, isRom)->getValueInt()},
+-            {Input::Button::Left,   get(Option::Id::KEY_LEFT, isRom)->getValueInt()},
+-            {Input::Button::Right,  get(Option::Id::KEY_RIGHT, isRom)->getValueInt()},
+-            {Input::Button::Select, get(Option::Id::KEY_SELECT, isRom)->getValueInt()},
+-            {Input::Button::Start,  get(Option::Id::KEY_START, isRom)->getValueInt()},
+-            {Input::Button::A,      get(Option::Id::KEY_A, isRom)->getValueInt()},
+-            {Input::Button::B,      get(Option::Id::KEY_B, isRom)->getValueInt()},
+-            {Input::Button::X,      get(Option::Id::KEY_X, isRom)->getValueInt()},
+-            {Input::Button::Y,      get(Option::Id::KEY_Y, isRom)->getValueInt()},
+-            {Input::Button::LT,     get(Option::Id::KEY_LT, isRom)->getValueInt()},
+-            {Input::Button::RT,     get(Option::Id::KEY_RT, isRom)->getValueInt()},
+-            {Input::Button::LB,     get(Option::Id::KEY_LB, isRom)->getValueInt()},
+-            {Input::Button::RB,     get(Option::Id::KEY_RB, isRom)->getValueInt()},
+-            //{Input::Button::LS,     get(Option::Id::KEY_UP, isRom)->getValueInt()},
+-            //{Input::Button::RS,     get(Option::Id::KEY_UP, isRom)->getValueInt()},
+-            {Input::Button::Menu1,  get(Option::Id::KEY_MENU1, isRom)->getValueInt()},
+-            {Input::Button::Menu2,  get(Option::Id::KEY_MENU2, isRom)->getValueInt()}
+-    };
+-#else
+-    return {};
+-#endif
+-}
+-
+-std::vector<c2d::Input::ButtonMapping> Config::getJoystickMapping(int player, bool isRom) {
+-    // TODO: allow per player config ?
+-    return {
+-            {Input::Button::Up,     get(Option::Id::JOY_UP, isRom)->getValueInt()},
+-            {Input::Button::Down,   get(Option::Id::JOY_DOWN, isRom)->getValueInt()},
+-            {Input::Button::Left,   get(Option::Id::JOY_LEFT, isRom)->getValueInt()},
+-            {Input::Button::Right,  get(Option::Id::JOY_RIGHT, isRom)->getValueInt()},
+-            {Input::Button::Select, get(Option::Id::JOY_SELECT, isRom)->getValueInt()},
+-            {Input::Button::Start,  get(Option::Id::JOY_START, isRom)->getValueInt()},
+-            {Input::Button::A,      get(Option::Id::JOY_A, isRom)->getValueInt()},
+-            {Input::Button::B,      get(Option::Id::JOY_B, isRom)->getValueInt()},
+-            {Input::Button::X,      get(Option::Id::JOY_X, isRom)->getValueInt()},
+-            {Input::Button::Y,      get(Option::Id::JOY_Y, isRom)->getValueInt()},
+-            {Input::Button::LT,     get(Option::Id::JOY_LT, isRom)->getValueInt()},
+-            {Input::Button::RT,     get(Option::Id::JOY_RT, isRom)->getValueInt()},
+-            {Input::Button::LB,     get(Option::Id::JOY_LB, isRom)->getValueInt()},
+-            {Input::Button::RB,     get(Option::Id::JOY_RB, isRom)->getValueInt()},
+-            //{Input::Button::LS,     get(Option::Id::KEY_UP, isRom)->getValueInt()},
+-            //{Input::Button::RS,     get(Option::Id::KEY_UP, isRom)->getValueInt()},
+-            {Input::Button::Menu1,  get(Option::Id::JOY_MENU1, isRom)->getValueInt()},
+-            {Input::Button::Menu2,  get(Option::Id::JOY_MENU2, isRom)->getValueInt()}
+-    };
+-}
+-
+-c2d::Vector2i Config::getJoystickAxisLeftMapping(int player, bool isRom) {
+-    return {
+-            get(Option::Id::JOY_AXIS_LX, isRom)->getValueInt(),
+-            get(Option::Id::JOY_AXIS_LY, isRom)->getValueInt()
+-    };
+-}
+-
+-c2d::Vector2i Config::getJoystickAxisRightMapping(int player, bool isRom) {
+-    return {
+-            get(Option::Id::JOY_AXIS_RX, isRom)->getValueInt(),
+-            get(Option::Id::JOY_AXIS_RY, isRom)->getValueInt()
+-    };
+-}
+-
+-int Config::getJoystickDeadZone(int player, bool isRom) {
+-    return get(Option::Id::JOY_DEADZONE, isRom)->getValueInt();
+-}
+-
+-// TODO
+-/*
+-c2d::Vector2f Config::getScreenSize() {
+-    Option *opt = get(Option::Id::GUI_FULLSCREEN);
+-    if (opt && opt->getValueBool()) {
+-        return {0, 0};
+-    } else {
+-        return {
+-                (float) get(Option::Id::GUI_SCREEN_WIDTH)->getValueInt(),
+-                (float) get(Option::Id::GUI_SCREEN_HEIGHT)->getValueInt()
+-        };
+-    }
+-}
+-*/
+diff --git a/ui/c2dui_config.h b/ui/c2dui_config.h
+deleted file mode 100644
+index 18aef19..0000000
+--- a/ui/c2dui_config.h
++++ /dev/null
+@@ -1,91 +0,0 @@
+-//
+-// Created by cpasjuste on 05/12/16.
+-//
+-
+-#ifndef C2DUI_CONFIG_H
+-#define C2DUI_CONFIG_H
+-
+-#include "libconfig.h"
+-
+-#define FBN_PATH_ARCADE     0
+-#define FBN_PATH_CHANNELF   1
+-#define FBN_PATH_COLECO     2
+-#define FBN_PATH_FDS        3
+-#define FBN_PATH_GAMEGEAR   4
+-#define FBN_PATH_MEGADRIVE  5
+-#define FBN_PATH_MSX        6
+-#define FBN_PATH_NES        7
+-#define FBN_PATH_NGP        8
+-#define FBN_PATH_PCE        9
+-#define FBN_PATH_SG1000     10
+-#define FBN_PATH_SGX        11
+-#define FBN_PATH_SMS        12
+-#define FBN_PATH_SPECTRUM   13
+-#define FBN_PATH_TG16       14
+-#define FBN_PATH_MAX        15
+-
+-namespace c2dui {
+-
+-    class Config {
+-
+-    public:
+-
+-        Config(UiMain *iu, int version, const std::string &defaultRomsPath = "roms/");
+-
+-        virtual ~Config() = default;
+-
+-        void load(const ss_api::Game &game = ss_api::Game());
+-
+-        void save(const ss_api::Game &game = ss_api::Game());
+-
+-        void reset();
+-
+-        std::string getConfigPath();
+-
+-        std::string getRomPath(int n = 0);
+-
+-        std::vector <std::string> getRomPaths();
+-
+-        std::vector <Option> *get(bool isRom = false);
+-
+-        Option *get(int id, bool isRom = false);
+-
+-        bool add(int target,
+-                 const std::string &text, const std::vector <std::string> &values,
+-                 int defaultValue, int id, unsigned int flags);
+-
+-        void append(const std::string &text, const std::vector <std::string> &values,
+-                    int defaultValue, int id, unsigned int flags);
+-
+-        void append(const std::string &text, int value, int id, unsigned int flags);
+-
+-        bool hide(int id, bool isRom = false);
+-
+-        virtual std::vector <c2d::Input::ButtonMapping> getKeyboardMapping(int player, bool isRom = false);
+-
+-        virtual std::vector <c2d::Input::ButtonMapping> getJoystickMapping(int player, bool isRom = false);
+-
+-        virtual c2d::Vector2i getJoystickAxisLeftMapping(int player, bool isRom = false);
+-
+-        virtual c2d::Vector2i getJoystickAxisRightMapping(int player, bool isRom = false);
+-
+-        virtual int getJoystickDeadZone(int player, bool isRom = false);
+-
+-        // TODO
+-        //c2d::Vector2f getScreenSize();
+-
+-    protected:
+-        std::vector <std::string> roms_paths;
+-
+-    private:
+-        UiMain *m_ui;
+-        std::vector <Option> options_gui;
+-        std::vector <Option> options_rom;
+-        std::string configPath;
+-        std::string dataPath;
+-
+-        int version;
+-    };
+-}
+-
+-#endif //C2DUI_CONFIG_H
+diff --git a/ui/c2dui_option.cpp b/ui/c2dui_option.cpp
+deleted file mode 100644
+index 73eb04a..0000000
+--- a/ui/c2dui_option.cpp
++++ /dev/null
+@@ -1,167 +0,0 @@
+-//
+-// Created by cpasjuste on 05/12/16.
+-//
+-
+-#include <c2dui.h>
+-#include "c2dui_option.h"
+-
+-
+-Option::Option(const std::string &text,
+-               const std::vector<std::string> &options,
+-               int defaultValueIndex, int id, unsigned int flags) {
+-    this->flags = flags;
+-    this->name = text;
+-    this->options = options;
+-    this->id = id;
+-    if (defaultValueIndex < (int) this->options.size()) {
+-        current_option = this->options.at(defaultValueIndex);
+-    }
+-}
+-
+-std::string Option::getName() const {
+-    return name;
+-}
+-
+-std::string Option::getInfo() const {
+-    return info;
+-}
+-
+-void Option::setInfo(const std::string &inf) {
+-    info = inf;
+-}
+-
+-std::vector<std::string> *Option::getValues() {
+-    return &options;
+-}
+-
+-std::string Option::getValueString() const {
+-    return current_option;
+-}
+-
+-void Option::setValueString(const std::string &value) {
+-    current_option = value;
+-}
+-
+-int Option::getValueInt(int defValue) {
+-    return c2d::Utility::parseInt(current_option, defValue);
+-}
+-
+-void Option::setValueInt(int value) {
+-    current_option = std::to_string(value);
+-}
+-
+-bool Option::getValueBool() {
+-    return getIndex() > 0;
+-}
+-
+-void Option::setValueBool(bool value) {
+-    setIndex(value ? 1 : 0);
+-}
+-
+-int Option::getId() {
+-    return id;
+-}
+-
+-void Option::setId(int _id) {
+-    id = _id;
+-}
+-
+-unsigned int Option::getFlags() {
+-    return flags;
+-}
+-
+-void Option::setFlags(unsigned int _flags) {
+-    flags = _flags;
+-}
+-
+-void Option::next() {
+-    bool found = false;
+-
+-    if (flags & Flags::INPUT) {
+-        return;
+-    }
+-
+-    if (flags & Flags::INTEGER) {
+-        int value = getValueInt();
+-        setValueInt(value + 1);
+-        return;
+-    }
+-
+-    int size = (int) options.size();
+-    for (int i = 0; i < size; i++) {
+-        if (options.at(i) == current_option) {
+-            if (i + 1 < size) {
+-                current_option = options.at(i + 1);
+-            } else {
+-                current_option = options.at(0);
+-            }
+-            found = true;
+-            break;
+-        }
+-    }
+-
+-    // fallback
+-    if (!found) {
+-        current_option = options.at(0);
+-    }
+-}
+-
+-void Option::prev() {
+-    bool found = false;
+-
+-    if (flags & Flags::INPUT) {
+-        return;
+-    }
+-
+-    if (flags & Flags::INTEGER) {
+-        int value = getValueInt();
+-        setValueInt(value - 1);
+-        return;
+-    }
+-
+-    int size = (int) options.size();
+-    for (int i = size - 1; i > -1; i--) {
+-        if (options.at(i) == current_option) {
+-            if (i - 1 > -1) {
+-                current_option = options.at(i - 1);
+-            } else {
+-                current_option = options.at(size - 1);
+-            }
+-            found = true;
+-            break;
+-        }
+-    }
+-
+-    // fallback
+-    if (!found) {
+-        current_option = options.at(0);
+-    }
+-}
+-
+-int Option::getIndex() {
+-    for (size_t i = 0; i < options.size(); i++) {
+-        if (current_option == options.at(i)) {
+-            return (int) i;
+-        }
+-    }
+-    return 0;
+-}
+-
+-void Option::setIndex(int index) {
+-    if ((size_t) index < options.size()) {
+-        current_option = options.at(index);
+-    }
+-}
+-
+-void Option::set(const Option &option) {
+-    name = option.name;
+-    info = option.info;
+-    options = option.options;
+-    current_option = option.current_option;
+-    flags = option.flags;
+-    id = option.id;
+-}
+-
+-int Option::size() {
+-    return (int) options.size();
+-}
+diff --git a/ui/c2dui_option.h b/ui/c2dui_option.h
+deleted file mode 100644
+index 321db81..0000000
+--- a/ui/c2dui_option.h
++++ /dev/null
+@@ -1,173 +0,0 @@
+-//
+-// Created by cpasjuste on 05/12/16.
+-//
+-
+-#ifndef _C2DUI_OPTION_H_
+-#define _C2DUI_OPTION_H_
+-
+-#include <string>
+-#include <vector>
+-
+-#define BIT(n) (1U<<(n))
+-
+-namespace c2dui {
+-
+-    class Option {
+-
+-    public:
+-
+-        enum Flags {
+-            MENU = BIT(0),
+-            INTEGER = BIT(1),
+-            STRING = BIT(2),
+-            BOOLEAN = BIT(3),
+-            INPUT = BIT(4),
+-            HIDDEN = BIT(5)
+-        };
+-
+-        enum Id {
+-            MENU_MAIN = 0,
+-            GUI_SHOW_FAVORITES,
+-            GUI_SHOW_AVAILABLE,
+-            GUI_SHOW_ZIP_NAMES,
+-            GUI_FILTER_CLONES,
+-            GUI_FILTER_SYSTEM,
+-            GUI_FILTER_EDITOR,
+-            GUI_FILTER_DEVELOPER,
+-            GUI_FILTER_PLAYERS,
+-            GUI_FILTER_RATING,
+-            GUI_FILTER_ROTATION,
+-            GUI_FILTER_RESOLUTION,
+-            GUI_FILTER_DATE,
+-            GUI_FILTER_GENRE,
+-            GUI_SHOW_ICONS,
+-            GUI_SCREEN_WIDTH,
+-            GUI_SCREEN_HEIGHT,
+-            GUI_FULLSCREEN,
+-            GUI_SKIN,
+-            GUI_SKIN_ASPECT,
+-            GUI_FONT_SCALING,
+-            GUI_VIDEO_SNAP_DELAY,
+-            MENU_ROM_OPTIONS,
+-            ROM_SCALING,
+-            ROM_SCALING_MODE,
+-            ROM_FILTER,
+-            ROM_SHADER,
+-#ifdef __VITA__
+-            ROM_WAIT_RENDERING,
+-#endif
+-            ROM_FORCE_60HZ,
+-            ROM_AUDIO_SYNC,
+-            ROM_AUDIO_FREQ,
+-            ROM_AUDIO_INTERPOLATION,
+-            ROM_AUDIO_FMINTERPOLATION,
+-            ROM_ROTATION,
+-            ROM_SHOW_FPS,
+-            ROM_FRAMESKIP,
+-            ROM_NEOBIOS,
+-            ROM_PSNES_CHEATS,
+-            ROM_PSNES_BLOCK_VRAM,
+-            ROM_PSNES_TRANSPARENCY,
+-            ROM_PSNES_DISPLAY_MESSAGES,
+-            ROM_PSNES_FRAMESKIP,
+-            ROM_PSNES_TURBO_MODE,
+-            ROM_PSNES_TURBO_FRAMESKIP,
+-            MENU_JOYPAD,
+-            JOY_UP,
+-            JOY_DOWN,
+-            JOY_LEFT,
+-            JOY_RIGHT,
+-            JOY_A,
+-            JOY_B,
+-            JOY_X,
+-            JOY_Y,
+-            JOY_LT,
+-            JOY_RT,
+-            JOY_LB,
+-            JOY_RB,
+-            JOY_SELECT,
+-            JOY_START,
+-            JOY_MENU1,
+-            JOY_MENU2,
+-            JOY_AXIS_LX,
+-            JOY_AXIS_LY,
+-            JOY_AXIS_RX,
+-            JOY_AXIS_RY,
+-            JOY_DEADZONE,
+-#ifndef NO_KEYBOARD
+-            MENU_KEYBOARD,
+-            KEY_UP,
+-            KEY_DOWN,
+-            KEY_LEFT,
+-            KEY_RIGHT,
+-            KEY_A,
+-            KEY_B,
+-            KEY_X,
+-            KEY_Y,
+-            KEY_LT,
+-            KEY_RT,
+-            KEY_LB,
+-            KEY_RB,
+-            KEY_SELECT,
+-            KEY_START,
+-            KEY_MENU1,
+-            KEY_MENU2,
+-#endif
+-        };
+-
+-        Option() = default;
+-
+-        Option(const std::string &name, const std::vector<std::string> &options,
+-               int defaultValueIndex, int id, unsigned int flags = INTEGER);
+-
+-        std::string getName() const;
+-
+-        std::string getInfo() const;
+-
+-        void setInfo(const std::string &info);
+-
+-        std::string getValueString() const;
+-
+-        void setValueString(const std::string &value);
+-
+-        int getValueInt(int defValue = 0);
+-
+-        void setValueInt(int value);
+-
+-        bool getValueBool();
+-
+-        void setValueBool(bool value);
+-
+-        std::vector<std::string> *getValues();
+-
+-        int getIndex();
+-
+-        void setIndex(int index);
+-
+-        int getId();
+-
+-        void setId(int id);
+-
+-        unsigned int getFlags();
+-
+-        void setFlags(unsigned int flags);
+-
+-        void next();
+-
+-        void prev();
+-
+-        void set(const Option &option);
+-
+-        int size();
+-
+-    private:
+-        std::string name;
+-        std::string info;
+-        std::vector<std::string> options;
+-        std::string current_option;
+-        unsigned int flags = INTEGER;
+-        int id = 0;
+-    };
+-}
+-
+-#endif //_C2DUI_OPTION_H_
+diff --git a/ui/c2dui_romlist.cpp b/ui/c2dui_romlist.cpp
+deleted file mode 100644
+index c06384d..0000000
+--- a/ui/c2dui_romlist.cpp
++++ /dev/null
+@@ -1,175 +0,0 @@
+-//
+-// Created by cpasjuste on 19/10/16.
+-//
+-
+-#include <vector>
+-#include <string>
+-#include <algorithm>
+-#include "c2dui.h"
+-
+-RomList::RomList(UiMain *_ui, const std::string &emuVersion, const std::vector<std::string> &_filters) {
+-    printf("RomList()\n");
+-    ui = _ui;
+-    paths = ui->getConfig()->getRomPaths();
+-    filters = _filters;
+-
+-    // UI
+-    rect = new C2DRectangle(
+-            Vector2f(ui->getSize().x - 8, ui->getSize().y - 8));
+-    ui->getSkin()->loadRectangleShape(rect, {"MAIN"});
+-
+-    auto *title = new RectangleShape({16, 16});
+-    if (ui->getSkin()->loadRectangleShape(title, {"MAIN", "TITLE"})) {
+-        title->setOrigin(Origin::Center);
+-        title->setPosition(Vector2f(rect->getSize().x / 2, rect->getSize().y / 2));
+-        float scaling = std::min(
+-                (rect->getSize().x * 0.8f) / title->getSize().x,
+-                (rect->getSize().y * 0.8f) / title->getSize().y);
+-        title->setScale(scaling, scaling);
+-        rect->add(title);
+-    } else {
+-        delete (title);
+-    }
+-
+-    text = new Text();
+-    ui->getSkin()->loadText(text, {"ROM_LIST", "TEXT"});
+-    text->setOrigin(Origin::BottomLeft);
+-    text->setPosition(8, rect->getSize().y - 8);
+-    rect->add(text);
+-
+-    auto *version = new Text();
+-    ui->getSkin()->loadText(version, {"ROM_LIST", "TEXT"});
+-    version->setOrigin(Origin::BottomRight);
+-    version->setPosition(rect->getSize().x - 8, rect->getSize().y - 8);
+-    version->setString(emuVersion);
+-    rect->add(version);
+-
+-    ui->add(rect);
+-    ui->flip();
+-    // UI
+-
+-    printf("RomList: building list...\n");
+-    time_start = ui->getElapsedTime().asSeconds();
+-
+-    gameList = new GameList();
+-    gameListFav = new GameList();
+-
+-    printf("RomList()\n");
+-}
+-
+-void RomList::setLoadingText(const char *format, ...) {
+-    char buffer[512];
+-    va_list arg;
+-    va_start(arg, format);
+-    vsnprintf(buffer, 512, format, arg);
+-    va_end(arg);
+-
+-    text->setString(buffer);
+-    ui->flip();
+-}
+-
+-void RomList::build(bool addArcadeSystem, const ss_api::System &system) {
+-    std::string romPath = ui->getConfig()->getRomPaths().at(FBN_PATH_ARCADE);
+-    printf("RomList::build(): ROM_PATH_0: %s\n", romPath.c_str());
+-
+-    // look for a "gamelist.xml" file inside rom folder, if none found use embedded (romfs) "gamelist.xml"
+-    std::string gameListPath = ui->getConfig()->getRomPaths().at(FBN_PATH_ARCADE) + "gamelist.xml";
+-    if (!ui->getIo()->exist(gameListPath)) {
+-        gameListPath = ui->getIo()->getRomFsPath() + "gamelist.xml";
+-    }
+-
+-    bool showAvailableOnly = ui->getConfig()->get(Option::Id::GUI_SHOW_AVAILABLE)->getValueBool();
+-    gameList->append(gameListPath,
+-                     ui->getConfig()->getRomPaths().at(FBN_PATH_ARCADE), false, filters, system, showAvailableOnly);
+-
+-    setLoadingText("Games: %li / %li", gameList->getAvailableCount(), gameList->games.size());
+-    printf("RomList::build: %s, games found: %zu / %zu\n",
+-           gameListPath.c_str(), gameList->getAvailableCount(), gameList->games.size());
+-
+-    // sort lists
+-    std::sort(gameList->systemList.systems.begin(), gameList->systemList.systems.end(), Api::sortSystemByName);
+-    std::sort(gameList->editors.begin(), gameList->editors.end(), Api::sortEditorByName);
+-    std::sort(gameList->developers.begin(), gameList->developers.end(), Api::sortDeveloperByName);
+-    std::sort(gameList->genres.begin(), gameList->genres.end(), Api::sortGenreByName);
+-    std::sort(gameList->players.begin(), gameList->players.end(), Api::sortInteger);
+-    std::sort(gameList->ratings.begin(), gameList->ratings.end(), Api::sortInteger);
+-    std::sort(gameList->rotations.begin(), gameList->rotations.end(), Api::sortInteger);
+-    std::sort(gameList->resolutions.begin(), gameList->resolutions.end(), Api::sortByName);
+-    std::sort(gameList->dates.begin(), gameList->dates.end(), Api::sortByName);
+-
+-    gameList->resolutions.insert(gameList->resolutions.begin(), "ALL");
+-    gameList->dates.insert(gameList->dates.begin(), "ALL");
+-    if (addArcadeSystem && !gameList->findGamesBySystem(75).empty()) {
+-        gameList->systemList.systems.insert(gameList->systemList.systems.begin(), {9999, 0, "ARCADE"});
+-    }
+-
+-    ui->getConfig()->add(
+-            Option::Id::GUI_SHOW_ZIP_NAMES, "FILTER_SYSTEM",
+-            gameList->systemList.getNames(), 0, Option::Id::GUI_FILTER_SYSTEM,
+-            Option::Flags::STRING | Option::Flags::HIDDEN);
+-    ui->getConfig()->add(
+-            Option::Id::GUI_FILTER_SYSTEM, "FILTER_GENRE",
+-            gameList->getGenreNames(), 0, Option::Id::GUI_FILTER_GENRE, Option::Flags::STRING);
+-    ui->getConfig()->add(
+-            Option::Id::GUI_FILTER_GENRE, "FILTER_DATE",
+-            gameList->dates, 0, Option::Id::GUI_FILTER_DATE, Option::Flags::STRING);
+-    ui->getConfig()->add(
+-            Option::Id::GUI_FILTER_DATE, "FILTER_EDITOR",
+-            gameList->getEditorNames(), 0, Option::Id::GUI_FILTER_EDITOR, Option::Flags::STRING);
+-    ui->getConfig()->add(
+-            Option::Id::GUI_FILTER_EDITOR, "FILTER_DEVELOPER",
+-            gameList->getDeveloperNames(), 0, Option::Id::GUI_FILTER_DEVELOPER, Option::Flags::STRING);
+-    ui->getConfig()->add(
+-            Option::Id::GUI_FILTER_DEVELOPER, "FILTER_PLAYERS",
+-            gameList->getPlayersNames(), 0, Option::Id::GUI_FILTER_PLAYERS, Option::Flags::STRING);
+-    ui->getConfig()->add(
+-            Option::Id::GUI_FILTER_PLAYERS, "FILTER_RATING",
+-            gameList->getRatingNames(), 0, Option::Id::GUI_FILTER_RATING, Option::Flags::STRING);
+-    ui->getConfig()->add(
+-            Option::Id::GUI_FILTER_RATING, "FILTER_ROTATION",
+-            gameList->getRotationNames(), 0, Option::Id::GUI_FILTER_ROTATION,
+-            Option::Flags::STRING | Option::Flags::HIDDEN);
+-    ui->getConfig()->add(
+-            Option::Id::GUI_FILTER_ROTATION, "FILTER_RESOLUTION",
+-            gameList->resolutions, 0, Option::Id::GUI_FILTER_RESOLUTION, Option::Flags::STRING | Option::Flags::HIDDEN);
+-
+-    // we need to reload config to update new options we just added
+-    ui->getConfig()->reset();
+-    ui->getConfig()->load();
+-
+-    gameListFav->append(ui->getIo()->getDataPath() + "favorites.xml");
+-    for (size_t i = 0; i < gameListFav->games.size(); i++) {
+-        Game game = gameList->findGameByPathAndSystem(gameListFav->games[i].path, gameListFav->games[i].system.id);
+-        if (!game.path.empty()) {
+-            gameListFav->games[i].available = true;
+-            gameListFav->games[i].romsPath = game.romsPath;
+-        }
+-    }
+-    printf("RomList::build: %zu favorites\n", gameListFav->games.size());
+-
+-    float time_spent = ui->getElapsedTime().asSeconds() - time_start;
+-    printf("RomList::build(): list built in %f\n", time_spent);
+-
+-    // UI
+-    // remove ui widgets
+-    delete (rect);
+-}
+-
+-void RomList::addFav(const Game &game) {
+-    if (!gameListFav->exist(game.id)) {
+-        gameListFav->games.emplace_back(game);
+-        gameListFav->save(ui->getIo()->getDataPath() + "favorites.xml", "mixrbv2", "", "video");
+-    }
+-}
+-
+-void RomList::removeFav(const Game &game) {
+-    if (gameListFav->remove(game.id)) {
+-        gameListFav->save(ui->getIo()->getDataPath() + "favorites.xml", "mixrbv2", "", "video");
+-    }
+-}
+-
+-RomList::~RomList() {
+-    printf("~RomList()\n");
+-    delete (gameList);
+-    delete (gameListFav);
+-}
+diff --git a/ui/c2dui_ui_main.h b/ui/c2dui_ui_main.h
+deleted file mode 100644
+index 592562d..0000000
+--- a/ui/c2dui_ui_main.h
++++ /dev/null
+@@ -1,70 +0,0 @@
+-//
+-// Created by cpasjuste on 14/01/18.
+-//
+-
+-#ifndef GUI_H
+-#define GUI_H
+-
+-#define INPUT_DELAY 200
+-
+-namespace c2dui {
+-
+-    class UiMain : public c2d::C2DRenderer {
+-
+-    public:
+-        explicit UiMain(c2d::Io *io);
+-
+-        void init(UIRomList *romList, UiMenu *menu,
+-                  UiEmu *emu, UiStateMenu *state);
+-
+-        void setConfig(Config *cfg);
+-
+-        void setSkin(Skin *skin);
+-
+-        void onUpdate() override;
+-
+-        void updateInputMapping(bool isRomCfg);
+-
+-        Skin *getSkin();
+-
+-        Config *getConfig();
+-
+-        UIHighlight *getUiHighlight();
+-
+-        UIRomList *getUiRomList();
+-
+-        UiEmu *getUiEmu();
+-
+-        UiMenu *getUiMenu();
+-
+-        UiStateMenu *getUiStateMenu();
+-
+-        UiStatusBox *getUiStatusBox();
+-
+-        UIProgressBox *getUiProgressBox();
+-
+-        c2d::MessageBox *getUiMessageBox();
+-
+-        int getFontSize();
+-
+-        c2d::Vector2f getScaling();
+-
+-        bool done = false;
+-
+-    private:
+-        Config *pConfig = nullptr;
+-        Skin *pSkin = nullptr;
+-        UIHighlight *pHighlight = nullptr;
+-        UiMenu *pMenu = nullptr;
+-        UIRomList *pRomList = nullptr;
+-        UiEmu *pEmu = nullptr;
+-        UiStateMenu *pState = nullptr;
+-        UIProgressBox *pProgressBox = nullptr;
+-        c2d::MessageBox *pMessageBox = nullptr;
+-        UiStatusBox *pStatusBox = nullptr;
+-        c2d::C2DClock mTimer;
+-        unsigned int mOldKeys = 0;
+-    };
+-}
+-
+-#endif //GUI_H
+diff --git a/ui/c2dui_ui_menu.cpp b/ui/c2dui_ui_menu.cpp
+deleted file mode 100644
+index 9c8b36e..0000000
+--- a/ui/c2dui_ui_menu.cpp
++++ /dev/null
+@@ -1,421 +0,0 @@
+-//
+-// Created by cpasjuste on 30/01/18.
+-//
+-
+-#include "c2dui.h"
+-#include "c2dui_ui_menu.h"
+-
+-#define OPTION_ID_QUIT (-1)
+-#define OPTION_ID_STATES (-2)
+-#define OPTION_ID_OTHER (-3)
+-
+-class MenuLine : public c2d::RectangleShape {
+-
+-public:
+-    MenuLine(UiMain *u, FloatRect &rect, Skin::TextGroup &tg) : RectangleShape(rect) {
+-        pMain = u;
+-        textGroup = tg;
+-        Font *font = pMain->getSkin()->getFont();
+-
+-        name = new Text("OPTION NAME", textGroup.size, font);
+-        name->setFillColor(textGroup.color);
+-        name->setOutlineThickness(textGroup.outlineSize);
+-        name->setOutlineColor(textGroup.outlineColor);
+-        name->setOrigin(Origin::Left);
+-        name->setPosition(2 * pMain->getScaling().x, MenuLine::getSize().y / 2);
+-        name->setSizeMax((MenuLine::getSize().x * 0.55f), 0);
+-        MenuLine::add(name);
+-
+-        value = new Text("OPTION VALUE", textGroup.size, font);
+-        value->setFillColor(textGroup.color);
+-        value->setOutlineThickness(textGroup.outlineSize);
+-        value->setOutlineColor(textGroup.outlineColor);
+-        value->setOrigin(Origin::Left);
+-        value->setPosition((MenuLine::getSize().x * 0.6f), MenuLine::getSize().y / 2);
+-        value->setSizeMax(MenuLine::getSize().x * 0.38f, 0);
+-        MenuLine::add(value);
+-
+-        sprite = new Sprite();
+-        MenuLine::add(sprite);
+-    }
+-
+-    void set(const Option &opt) {
+-        option = opt;
+-
+-        setVisibility(Visibility::Visible);
+-        sprite->setVisibility(Visibility::Hidden);
+-
+-        // reset
+-        name->setString(option.getName());
+-        value->setVisibility(Visibility::Visible);
+-        setFillColor(Color::Transparent);
+-
+-        if (option.getFlags() & Option::Flags::INPUT) {
+-            Skin::Button *button = pMain->getSkin()->getButton(option.getValueInt());
+-            if (button && option.getId() < Option::Id::JOY_DEADZONE) {
+-                if (button->texture) {
+-                    sprite->setTexture(button->texture, true);
+-                    sprite->setVisibility(Visibility::Visible);
+-                    value->setVisibility(Visibility::Hidden);
+-                    float scaling = std::min(
+-                            getSize().x / (float) sprite->getSize().x,
+-                            getSize().y / (float) sprite->getSize().y);
+-                    sprite->setScale(scaling, scaling);
+-                    sprite->setPosition((MenuLine::getSize().x * 0.6f), MenuLine::getSize().y / 2);
+-                    sprite->setOrigin(Origin::Left);
+-                } else {
+-                    sprite->setVisibility(Visibility::Hidden);
+-                    value->setVisibility(Visibility::Visible);
+-                    value->setString(button->name);
+-                }
+-            } else {
+-                char btn[16];
+-                snprintf(btn, 16, "%i", option.getValueInt());
+-                value->setVisibility(Visibility::Visible);
+-                value->setString(btn);
+-            }
+-        } else if (option.getFlags() & Option::Flags::MENU) {
+-            value->setVisibility(Visibility::Hidden);
+-            setFillColor(pMain->getUiMenu()->getOutlineColor());
+-        } else {
+-            value->setVisibility(Visibility::Visible);
+-            value->setString(option.getValueString());
+-        }
+-    }
+-
+-    UiMain *pMain = nullptr;
+-    Text *name = nullptr;
+-    Text *value = nullptr;
+-    Sprite *sprite = nullptr;
+-    Skin::TextGroup textGroup;
+-    Option option;
+-};
+-
+-UiMenu::UiMenu(UiMain *uiMain) : SkinnedRectangle(uiMain, {"OPTIONS_MENU"}) {
+-    ui = uiMain;
+-    alpha = UiMenu::getAlpha();
+-
+-    // menu title
+-    title = new SkinnedText(uiMain, {"OPTIONS_MENU", "TITLE_TEXT"});
+-    UiMenu::add(title);
+-
+-    // retrieve skin config for options items
+-    textGroup = ui->getSkin()->getText({"OPTIONS_MENU", "ITEMS_TEXT"});
+-
+-    // calculate number of items shown
+-    lineHeight = (float) textGroup.size + (2 * ui->getScaling().y);
+-    maxLines = (int) (getSize().y / lineHeight);
+-    if ((float) maxLines * lineHeight < getSize().y) {
+-        lineHeight = getSize().y / (float) maxLines;
+-    }
+-
+-    // add selection rectangle (highlight)
+-    highlight = new RectangleShape({16, 16});
+-    ui->getSkin()->loadRectangleShape(highlight, {"SKIN_CONFIG", "HIGHLIGHT"});
+-    highlight->setSize(UiMenu::getSize().x - 2, lineHeight);
+-    highlight->move(1, 0);
+-    UiMenu::add(highlight);
+-
+-    // add options items
+-    for (unsigned int i = 0; i < (unsigned int) maxLines; i++) {
+-        FloatRect r = {0, lineHeight * (float) i, getSize().x, lineHeight};
+-        auto line = new MenuLine(ui, r, textGroup);
+-        lines.push_back(line);
+-        UiMenu::add(line);
+-    }
+-
+-    // tween
+-    Vector2f targetPos = {UiMenu::getPosition().x - UiMenu::getSize().x,
+-                          UiMenu::getPosition().y};
+-    tweenPosition = new TweenPosition({UiMenu::getPosition()}, targetPos, 0.2f);
+-    tweenPosition->setState(TweenState::Stopped);
+-    UiMenu::add(tweenPosition);
+-
+-    // hide by default
+-    UiMenu::setVisibility(Visibility::Hidden);
+-}
+-
+-void UiMenu::load(bool isRom) {
+-
+-    isRomMenu = isRom;
+-    isEmuRunning = ui->getUiEmu()->isVisible();
+-    Game game = ui->getUiRomList()->getSelection();
+-
+-    if (isRomMenu) {
+-        ui->getConfig()->load(game);
+-        title->setString(game.name);
+-    } else {
+-        title->setString("MAIN OPTIONS");
+-    }
+-
+-    // set options items (remove hidden options)
+-    optionIndex = highlightIndex = 0;
+-    options.clear();
+-    std::vector<Option> *opts = ui->getConfig()->get(isRomMenu);
+-    remove_copy_if(opts->begin(), opts->end(),
+-                   back_inserter(options), [this](Option &opt) {
+-                return isOptionHidden(&opt) || opt.getFlags() & Option::Flags::HIDDEN;
+-            });
+-
+-    options.push_back({"OTHER", {}, 0, OPTION_ID_OTHER, Option::Flags::MENU});
+-    if (isRomMenu) options.push_back({"STATES", {"GO"}, 0, OPTION_ID_STATES, Option::Flags::STRING});
+-    options.push_back({"QUIT", {"GO"}, 0, OPTION_ID_QUIT, Option::Flags::STRING});
+-
+-    setAlpha(isEmuRunning ? (uint8_t) (alpha - 50) : (uint8_t) alpha);
+-
+-    // update options lines/items (first option should always be a menu option)
+-    onKeyDown();
+-
+-    // finally, show me
+-    if (!isVisible()) {
+-        setLayer(1);
+-        setVisibility(Visibility::Visible, true);
+-    }
+-}
+-
+-void UiMenu::updateLines() {
+-    for (unsigned int i = 0; i < (unsigned int) maxLines; i++) {
+-        if (optionIndex + i >= options.size()) {
+-            lines[i]->setVisibility(Visibility::Hidden);
+-            continue;
+-        }
+-        // set line data
+-        const Option option = options.at(optionIndex + i);
+-        lines[i]->set(option);
+-        // set highlight position and color
+-        if ((int) i == highlightIndex) {
+-            highlight->setPosition({highlight->getPosition().x, lines[i]->getPosition().y});
+-            lines[i]->value->setOutlineColor(getOutlineColor());
+-        } else {
+-            lines[i]->value->setOutlineColor(textGroup.outlineColor);
+-        }
+-    }
+-}
+-
+-void UiMenu::onKeyUp() {
+-    int index = optionIndex + highlightIndex;
+-    int middle = maxLines / 2;
+-
+-    if (highlightIndex <= middle && index - middle > 0) {
+-        optionIndex--;
+-    } else {
+-        highlightIndex--;
+-    }
+-
+-    if (highlightIndex < 0) {
+-        highlightIndex = maxLines - 1;
+-        highlightIndex = (int) options.size() < maxLines - 1 ? (int) options.size() - 1 : maxLines - 1;
+-        optionIndex = ((int) options.size() - 1) - highlightIndex;
+-    }
+-
+-    // skip menus
+-    if (options.at(optionIndex + highlightIndex).getFlags() & Option::Flags::MENU) {
+-        return onKeyUp();
+-    }
+-
+-    updateLines();
+-}
+-
+-void UiMenu::onKeyDown() {
+-    int index = optionIndex + highlightIndex;
+-    int middle = maxLines / 2;
+-
+-    if (highlightIndex >= middle && index + (maxLines - middle) < (int) options.size()) {
+-        optionIndex++;
+-    } else {
+-        highlightIndex++;
+-    }
+-
+-    if (highlightIndex >= maxLines || optionIndex + highlightIndex >= (int) options.size()) {
+-        optionIndex = 0;
+-        highlightIndex = 0;
+-    }
+-
+-    // skip menus
+-    if (options.at(optionIndex + highlightIndex).getFlags() & Option::Flags::MENU) {
+-        return onKeyDown();
+-    }
+-
+-    updateLines();
+-}
+-
+-bool UiMenu::onInput(c2d::Input::Player *players) {
+-    unsigned int buttons = players[0].buttons;
+-
+-    if (ui->getUiStateMenu()->isVisible()) {
+-        return C2DObject::onInput(players);
+-    }
+-
+-    // UP
+-    if (buttons & Input::Button::Up) {
+-        onKeyUp();
+-    }
+-
+-    // DOWN
+-    if (buttons & Input::Button::Down) {
+-        onKeyDown();
+-    }
+-
+-    // LEFT /RIGHT
+-    if (buttons & Input::Button::Left || buttons & Input::Button::Right) {
+-        Option option = lines.at(highlightIndex)->option;
+-        if (option.getValues()->size() <= 1) {
+-            return true;
+-        }
+-        needSave = true;
+-        if (buttons & Input::Button::Left) {
+-            option.prev();
+-        } else {
+-            option.next();
+-        }
+-        // update option everywhere (todo: simplify)
+-        options.at(optionIndex + highlightIndex).set(option);
+-        lines.at(highlightIndex)->set(option);
+-        ui->getConfig()->get(option.getId(), isRomMenu)->set(option);
+-
+-        if (!option.getInfo().empty()) {
+-            ui->getUiStatusBox()->show(option.getInfo());
+-        }
+-
+-        switch (option.getId()) {
+-            case Option::Id::GUI_SHOW_FAVORITES:
+-            case Option::Id::GUI_SHOW_AVAILABLE:
+-            case Option::Id::GUI_SHOW_ZIP_NAMES:
+-            case Option::Id::GUI_FILTER_CLONES:
+-            case Option::Id::GUI_FILTER_SYSTEM:
+-            case Option::Id::GUI_FILTER_EDITOR:
+-            case Option::Id::GUI_FILTER_DEVELOPER:
+-            case Option::Id::GUI_FILTER_PLAYERS:
+-            case Option::Id::GUI_FILTER_RATING:
+-            case Option::Id::GUI_FILTER_ROTATION:
+-            case Option::Id::GUI_FILTER_RESOLUTION:
+-            case Option::Id::GUI_FILTER_DATE:
+-            case Option::Id::GUI_FILTER_GENRE: {
+-                std::string name = Utility::toUpper(option.getName());
+-                std::string value = Utility::toUpper(option.getValueString());
+-                if (option.getInfo().empty()) {
+-                    ui->getUiStatusBox()->show("%s: %s", name.c_str(), value.c_str());
+-                }
+-                ui->getUiRomList()->updateRomList();
+-                break;
+-            }
+-
+-            case Option::ROM_ROTATION:
+-            case Option::Id::ROM_SCALING:
+-                if (isEmuRunning) {
+-                    ui->getUiEmu()->getVideo()->updateScaling();
+-                    auto gw = (float) ui->getUiEmu()->getVideo()->getTextureRect().width;
+-                    auto gh = (float) ui->getUiEmu()->getVideo()->getTextureRect().height;
+-                    float gr = std::max(
+-                            (float) ui->getUiEmu()->getVideo()->aspect.x /
+-                            (float) ui->getUiEmu()->getVideo()->aspect.y,
+-                            (float) ui->getUiEmu()->getVideo()->aspect.y /
+-                            (float) ui->getUiEmu()->getVideo()->aspect.x);
+-                    float ow = gw * ui->getUiEmu()->getVideo()->getScale().x;
+-                    float oh = gh * ui->getUiEmu()->getVideo()->getScale().y;
+-                    float ratio = std::max(ow / oh, oh / ow);
+-                    ui->getUiStatusBox()->show(
+-                            "GAME: %ix%i - RATIO: %.2f | OUTPUT: %ix%i - RATIO: %.2f - SCALING: %.2fx%.2f",
+-                            (int) gw, (int) gh, gr, (int) ow, (int) oh, ratio,
+-                            ui->getUiEmu()->getVideo()->getScale().x, ui->getUiEmu()->getVideo()->getScale().y);
+-                }
+-                break;
+-            case Option::Id::ROM_SCALING_MODE:
+-                if (option.getValueString() == "AUTO") {
+-                    ui->getUiStatusBox()->show("TRY TO KEEP INTEGER SCALING IF ASPECT RATIO IS NOT TOO DIVERGENT");
+-                } else if (option.getValueString() == "ASPECT") {
+-                    ui->getUiStatusBox()->show("KEEP GAME ASPECT RATIO - SOME SHADERS MAY NOT RENDER CORRECTLY");
+-                } else {
+-                    ui->getUiStatusBox()->show(
+-                            "FORCE INTEGER SCALING - ASPECT RATIO MAY BE WRONG BUT SHADERS WILL RENDER CORRECTLY");
+-                }
+-                if (isEmuRunning) {
+-                    ui->getUiEmu()->getVideo()->updateScaling();
+-                }
+-                break;
+-            case Option::Id::ROM_FILTER:
+-                if (isEmuRunning) {
+-                    ui->getUiEmu()->getVideo()->setFilter((Texture::Filter) option.getIndex());
+-                }
+-                break;
+-            case Option::Id::ROM_SHADER:
+-                if (isEmuRunning) {
+-                    ui->getUiEmu()->getVideo()->setShader(option.getIndex());
+-                    ui->getUiStatusBox()->show(option.getValueString());
+-                }
+-                break;
+-#ifdef __VITA__
+-                case Option::Id::ROM_WAIT_RENDERING:
+-                    if (isEmuRunning) {
+-                        ((PSP2Renderer *) ui)->setWaitRendering(option.getValueBool());
+-                    }
+-                    break;
+-#endif
+-            case Option::Id::GUI_VIDEO_SNAP_DELAY:
+-                ui->getUiRomList()->setVideoSnapDelay(option.getValueInt());
+-                break;
+-
+-            default:
+-                break;
+-        }
+-    }
+-
+-    // FIRE1 (ENTER)
+-    if (buttons & Input::Button::A) {
+-        Option option = lines.at(highlightIndex)->option;
+-        if (option.getFlags() == Option::Flags::INPUT) {
+-            int new_key = 0;
+-            int res = ui->getUiMessageBox()->show("NEW INPUT", "PRESS A BUTTON", "", "", &new_key, 9);
+-            if (res != MessageBox::TIMEOUT) {
+-                needSave = true;
+-                // update option everywhere (todo: simplify)
+-                option.setValueInt(new_key);
+-                options.at(optionIndex + highlightIndex).setValueInt(new_key);
+-                lines.at(highlightIndex)->set(option);
+-                ui->getConfig()->get(option.getId(), isRomMenu)->set(option);
+-            }
+-        } else if (option.getId() == OPTION_ID_QUIT) {
+-            if (isEmuRunning) {
+-                setVisibility(Visibility::Hidden, true);
+-                ui->getUiEmu()->stop();
+-                ui->getUiRomList()->setVisibility(Visibility::Visible);
+-                ui->getInput()->clear();
+-            } else {
+-                // be sure options are saved before exiting
+-                ui->getConfig()->save(isRomMenu ? ui->getUiRomList()->getSelection() : ss_api::Game());
+-                needSave = false;
+-                ui->done = true;
+-            }
+-        } else if (option.getId() == OPTION_ID_STATES) {
+-            setVisibility(Visibility::Hidden, true);
+-            ui->getUiStateMenu()->setVisibility(Visibility::Visible, true);
+-        }
+-    }
+-
+-    // FIRE2 (BACK)
+-    if (buttons & Input::Button::Menu1 || buttons & Input::Button::Menu2 || buttons & Input::Button::B) {
+-        setVisibility(Visibility::Hidden, true);
+-        if (isEmuRunning) {
+-            ui->getUiEmu()->resume();
+-        }
+-    }
+-
+-    return true;
+-}
+-
+-void UiMenu::setVisibility(Visibility visibility, bool tweenPlay) {
+-    if (ui->getUiRomList() && ui->getUiRomList()->isVisible()) {
+-        ui->getUiRomList()->getBlur()->setVisibility(visibility, true);
+-    }
+-    if (visibility == Visibility::Hidden && needSave) {
+-        ui->getConfig()->save(isRomMenu ? ui->getUiRomList()->getSelection() : ss_api::Game());
+-        needSave = false;
+-    }
+-
+-    RectangleShape::setVisibility(visibility, tweenPlay);
+-}
+-
+-UiMenu::~UiMenu() {
+-    printf("~UIMenuNew\n");
+-}
+-

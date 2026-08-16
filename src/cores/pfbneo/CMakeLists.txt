@@ -135,14 +135,17 @@ set(CPU_DIRS
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/adsp2100
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/arm
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/arm7
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/arm9
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/e132xs
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/f8
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/h6280
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/hd6309
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/hmcs40
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/i8x41
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/i386
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/i8039
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/i8051
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/i8085
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/konami
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/m68k
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/m377
@@ -150,20 +153,22 @@ set(CPU_DIRS
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/m6800
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/m6805
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/m6809
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/mb88xx
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/mips3
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/nec
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/pic16c5x
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/s2650
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/sh2
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/sh4
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/t11
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/tlcs90
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/tlcs900
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/tms34
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/tms32010
-        #${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/tms34010
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/upd7725
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/upd7810
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/v60
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/xa
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/z80
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/z180
 )
@@ -176,6 +181,7 @@ list(REMOVE_ITEM SRC_CPU
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/tms34010/tms34010_newdasm.cpp
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/tms34010/tms34010_dasm.cpp
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/mips3/x64/mips3_x64.cpp
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/hmcs40/hmcs40op.cpp
 )
 
 if (OPTION_LIGHT)
@@ -242,6 +248,28 @@ file(GLOB SRC_7Z
 ##############
 # pfbneo
 ##############
+# 自动生成空壳（Stub）函数文件，完美跳过 ZSTD 和 LZMA 的底层库依赖
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/deps/chd_stubs.c
+"
+void* CHDR_LzmaDec_Allocate() { return 0; }
+void CHDR_LzmaDec_Free() {}
+int CHDR_LzmaDec_Init() { return 0; }
+int CHDR_LzmaDec_DecodeToBuf() { return 0; }
+
+void* ZSTD_createDStream() { return 0; }
+unsigned ZSTD_freeDStream() { return 0; }
+unsigned ZSTD_initDStream() { return 0; }
+unsigned ZSTD_isError() { return 1; }
+unsigned ZSTD_decompressStream() { return 0; }
+"
+)
+
+# 包含所有的 CHD 编解码源文件，并将生成的空壳文件加入编译列表
+file(GLOB SRC_DEPLIBS
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/dep/libs/dr_libs/*.c*
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/dep/libs/libchdr/*.c
+)
+list(APPEND SRC_DEPLIBS ${CMAKE_CURRENT_BINARY_DIR}/deps/chd_stubs.c)
 set(PFBA_DIRS sources sources/fbneo)
 file(GLOB SRC_PFBA sources/*.c* sources/fbneo/*.c*)
 list(APPEND SRC_PFBA ../main.cpp)
@@ -254,6 +282,10 @@ set(INC ${PFBA_DIRS}
         ${DRV_DIRS}
         ${CPU_DIRS}
         ${INTF_DIRS}
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/dep/libs
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/dep/libs/dr_libs
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/dep/libs/libchdr
+        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/dep/libs/libchdr/include
         ${CMAKE_CURRENT_BINARY_DIR}/deps
 )
 
@@ -265,7 +297,7 @@ set(FLAGS
         -DLSB_FIRST
         -DINCLUDE_7Z_SUPPORT -DMINIZIP_LIB
         -DBUILD_SDL2 -DBUILD_M68K
-        #-fomit-frame-pointer
+        -DWITHOUT_ZSTD -DWITHOUT_LZMA
         -Wno-strict-aliasing -Wno-long-long
         -Wno-write-strings -Wno-sign-compare -Wno-uninitialized -Wno-unused
         -Wno-conversion -Wno-attributes -Wno-unused-parameter -Wno-unused-value
@@ -295,7 +327,7 @@ elseif (PLATFORM_PS4)
     set(PS4_PKG_TITLE_ID "PFBN00001")
     set(PS4_PKG_VERSION "${VERSION_MAJOR}.${VERSION_MINOR}")
     list(APPEND FLAGS -D__fastcall=)
-    list(APPEND LDFLAGS)
+    list(APPEND LDFLAGS --allow-multiple-definition)
 elseif (PLATFORM_PS3)
     ##############
     # PS3
@@ -356,7 +388,7 @@ elseif (PLATFORM_ANDROID)
 endif (PLATFORM_VITA)
 
 # source files
-set(SRC ${SRC_PFBA} ${SRC_CPU} ${SRC_DRV} ${SRC_BURN} ${SRC_BURNER} ${SRC_INTF} ${SRC_7Z})
+set(SRC ${SRC_PFBA} ${SRC_CPU} ${SRC_DRV} ${SRC_BURN} ${SRC_BURNER} ${SRC_INTF} ${SRC_7Z} ${SRC_DEPLIBS})
 
 #####################
 # pfbneo executable

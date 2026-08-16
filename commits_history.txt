@@ -1,0 +1,109 @@
+9c1f6a3 Merge pull request #307 from Cpasjuste/dev
+4a622fa switch: fix libmpv crash on second app launch
+79a27a7 pgba: update README.MD
+7fdf8de misc: code cleanup
+f217138 ui_video.cpp: fix fit scaling on high resolution screens
+3283807 libcross2d: bump submodule
+06a7b75 Merge pull request #306 from Cpasjuste/master
+61f8ebf Merge pull request #305 from Cpasjuste/dev
+11a0255 Merge pull request #304 from geonux/feat_enable_gb_gbc
+7b0ff19 pgba: Add Game Boy, Game Boy Color, and Super Game Boy support
+6d466be pemu: bump package
+c005ad8 mpv: few fixes and improvements (fix loadfile, ...)
+61ea036 Merge pull request #302 from Cpasjuste/dev
+3412a3f mgba: bump core to 0.10.5 sscrap: update submodule
+43410bc workflows: fix windows by disabling mgba for now
+a17308f workflows: fix windows by disabling mgba for now
+18e44d8 workflows: ps4, oops
+d10e0e3 workflows: fix windows, hopefully
+ab9d532 workflows: fix vita, hopefully
+d7ccdd5 workflows: fix switch and ps4, hopefully
+c0edb37 - switch: fix mpv linking - workflows: disable automatic build until all is solved
+5c28c25 - pgen: fix for latest libcross2d changes - cmake: bump cmake minimum required version
+67ea252 workflows: try to fix vita and 3ds...
+6943c6d workflows: ubuntu-24.04 > ubuntu-22.04
+6b51401 libcross2d: bump submodule
+d4c8543 workflow: bump ubuntu version
+3302acb 3ds: fix building (note: 3ds builds not ready...)
+5dca8da vita(pfbneo): fix compilation (missing header)
+7dcb506 cmake: hopefully fix minizip dep
+4aafc63 vita: enable large heap size (256MB) vita: enable console games back vita: fix scaling options (missing scale 2x) vita: fix crash in release builds
+bf24478 libcross2d: update submodule
+07bfa92 config: fix crash when config file doesn't exists cmake: fix deps (linux) mpv: fixes for v0.38.0
+b627240 config: fix crash when config file doesn't exists cmake: fix deps (linux) mpv: fixes for v0.38.0
+1a9ff6d Update README.md
+158eda3 Merge branch 'dev' of github.com:Cpasjuste/pemu into dev
+2399fbd libcross2d: bump submodule
+a222cdc Merge pull request #272 from R-YaTian/dev
+99772b9 misc: fix readme
+02095c7 Fix pfbneo target linking issue for MSYS
+79b0c31 misc: add support for loading game from console argument (fix https://github.com/Cpasjuste/pemu/issues/249)
+c987d14 code: minor cleanup
+b43b3d9 misc: fix readme's
+d0d8a94 switch: fix pgba release workflow
+a5cf8dc Merge pull request #265 from Cpasjuste/dev
+35de406 pfbneo: fix driver lookup
+862b91c psnes: fix paths skins: fix rom counter colors (MAIN > ROM_LIST > TITLE_TEXT)
+033808b ui: add roms count in rom listing
+4b1218b common: update readme's
+ff452ec config: allow adding custom roms paths to config file
+b3ee63c windows: fix pgba compilation
+3fbd447 github: enable workflow_dispatch for releases target
+a666c1a vita: fix pgba compilation
+791ba79 ps4: fix pgba compilation
+35c60bf ui: rename FILTER_AVAILABLE to FILTER_MISSING
+6e0d9f6 ui: fix roms/systems filtering
+f66049a common: set option "FILTER_AVAILABLE" to "ON" by default
+a5f27cf vita: fix fbneo core bump
+254bbde ui: fix roms listbox up/down
+455da84 common: remove embedded gamelist support (use gamelist.xml files found in roms paths) (END)
+a9dbdc1 fbneo: bump to latest git revision (https://github.com/finalburnneo/FBNeo/tree/36092078ac2ba48acf2105d2cad8310ab2236224)
+363c6a5 romlist.cpp: minor cleanup
+fe0c64d misc: minor cleanup
+98a46fe fbneo: fix/finnish gamelist.xml support
+28c5301 common: remove embedded gamelist support (use gamelist.xml files found in roms paths) (wip 2)
+1d230b0 common: remove embedded gamelist support (use gamelist.xml files found in roms paths) (wip)
+98e9bc6 pfbneo: fix title image
+aaf62b4 pgba: add save support
+1879f90 ui: refactor config/options (wip)
+046a986 ui: refactor config/options (wip)
+d247949 ui: fix menu highlight height
+34e8de3 pgba: minor changes
+586112f pgba: add input support
+d7ef1bc pgba: add crappy gfx (2)
+a6b49f3 pgba: add crappy gfx
+cc9c4c5 pgba: add zip support
+9f383a6 pgba: add mGBA core (wip 2)
+15dcb5a github: cleanup workflows
+b1792bc pgba: add mGBA core (wip)
+855fb59 misc: minor cleanup
+c2693fc pgen: fix roms paths
+bcb2425 cores: simplify code (wip)
+7285fd2 cores: simplify code (wip)
+2b340a8 cores: simplify code (wip)
+89658fb common: fix games systems when using recalbox gamelist.xml
+2a97926 ui: improve filtering
+947395c ui_main.cpp: minor cleanup
+4424210 pfbneo: fix light target
+30b321e misc: refactor code (unify main.cpp for every cores)
+aa6bb1b misc: refactor code organization
+2e06142 misc: code cleanup (rename c2dui namespace to pemu)
+d2d6e7f misc: minor cleanup
+7204bf0 misc: refactor code organization
+8dbc90a config: rename config-new.cfg to config.cfg
+b91771d switch/vita/ps4: fix for latest changes
+7f4abbe misc: move modules to external dir
+5301cbe misc: move cores to external dir
+8719fcc misc: rename ui to src
+8421176 config: rename
+936794b config: rename
+dfbc8b2 config: big refactor
+4b3e19c config: refactor (wip)
+27af367 vita: fix compilation
+397d92a linux: remove romfs support (fusefs, may fix https://github.com/Cpasjuste/pemu/issues/221)
+1338126 minor cleanup
+95f1bd8 windows/linux: fix fullscreen on/off option
+e849314 cmake: bump cmake_minimum_required to 3.5
+a5a8e75 windows: fix building
+95ef64d Merge pull request #259 from Cpasjuste/dev
+57062b6 workflows: try to fix deprecated release token

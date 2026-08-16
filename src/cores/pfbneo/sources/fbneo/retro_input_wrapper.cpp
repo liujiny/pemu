@@ -3,6 +3,7 @@
 //
 
 #include "retro_input.h"
+#include "skeleton/pemu.h" // 引入 pemu 配置支持
 
 unsigned nGameType = 0;
 bool bIsNeogeoCartGame = false;
@@ -16,20 +17,39 @@ INT32 nAnalogSpeed = 0x0100;
 INT32 nFireButtons = 0;
 static int nDIPOffset;
 
+// 连发帧计数器
+static unsigned int s_autofire_counter = 0;
+
 int16_t input_cb(unsigned port, unsigned device, unsigned index, unsigned id) {
     if (port < PLAYER_MAX) {
         unsigned int buttons = c2d_renderer->getInput()->getPlayer((int) port)->buttons;
-        //printf("input_cb(joy): port: %i, device: %i, index: %i, id: %x (keys: %x)\n",
-        //     port, device, index, id, keys);
 
         if (device == RETRO_DEVICE_JOYPAD) {
+            // 动态读取配置中的连发开关状态（传入 true 以正确读取当前游戏配置）
+            bool autofire_enabled = false;
+            if (c2d_renderer) {
+                auto *ui = dynamic_cast<pemu::UiMain*>(c2d_renderer);
+                if (ui && ui->getConfig()) {
+                    // 注意这里的第二个参数 true 非常关键！
+                    autofire_enabled = ui->getConfig()->get(pemu::PEMUConfig::OptId::EMU_AUTOFIRE, true)->getInteger() > 0;
+                }
+            }
+
+            // 如果在配置中开启了连发，且当前按下的是 A 键
+            if (autofire_enabled && id == RETRO_DEVICE_ID_JOYPAD_B) {
+                s_autofire_counter++;
+                // 每 4 帧中前 2 帧有效，后 2 帧模拟松开
+                if ((s_autofire_counter % 4) >= 2 && (buttons & id)) {
+                    return 0; 
+                }
+            }
+
             return buttons & id ? 1 : 0;
         }
     }
 
     return 0;
 }
-
 void poll_cb() {}
 
 static void InpDIPSWGetOffset() {

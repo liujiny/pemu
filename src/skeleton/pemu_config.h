@@ -44,6 +44,8 @@ namespace pemu {
             EMU_SCALING_MODE,
             EMU_FILTER,
             EMU_SHADER,
+            EMU_AUTOFIRE, // <-- 连发开关配置项
+	    EMU_CHEATS, // <-- 确保有这一行！
 #ifdef __VITA__
             EMU_WAIT_RENDERING,
 #endif
