@@ -1,5 +1,6 @@
 // Driver Init module
-
+#define DR_FLAC_IMPLEMENTATION
+#include "dr_flac.h"
 #include "skeleton/pemu.h"
 #include "burner.h"
 #include "retro_input.h"
@@ -21,46 +22,30 @@ bool is_netgame_or_recording() {
 static int ProgressCreate();
 
 static UINT8 NeoSystemList[] = {
-        0x13, // "Universe BIOS ver. 4.0"
-        0x14, // "Universe BIOS ver. 3.3"
-        0x15, // "Universe BIOS ver. 3.2"
-        0x16, // "Universe BIOS ver. 3.1"
-        0x00, // "MVS Asia/Europe ver. 6 (1 slot)"
-        0x01, // "MVS Asia/Europe ver. 5 (1 slot)"
-        0x02, // "MVS Asia/Europe ver. 3 (4 slot)"
-        0x03, // "MVS USA ver. 5 (2 slot)"
-        0x04, // "MVS USA ver. 5 (4 slot)"
-        0x05, // "MVS USA ver. 5 (6 slot)"
-        0x08, // "MVS Japan ver. 6 (? slot)"
-        0x09, // "MVS Japan ver. 5 (? slot)"
-        0x0a, // "MVS Japan ver. 6 (4 slot)"
-        0x10, // "AES Asia"
-        0x0f, // "AES Japan"
-        0x0b, // "NEO-MVH MV1C (Asia)"
-        0x0c, // "NEO-MVH MV1C (Japan)"
-        0x12, // "Deck ver. 6 (Git Ver 1.3)"
-        0x11, // "Development Kit"
+        0x13, 0x14, 0x15, 0x16, 0x00, 0x01, 0x02, 0x03, 
+        0x04, 0x05, 0x08, 0x09, 0x0a, 0x10, 0x0f, 0x0b, 
+        0x0c, 0x12, 0x11
 };
+
+static UINT32 myHighCol16(int r, int g, int b, int /* i */) {
+    UINT32 t;
+    t = (r << 8) & 0xf800;
+    t |= (g << 3) & 0x07e0;
+    t |= (b >> 3) & 0x001f;
+    return t;
+}
 
 static int DoLibInit() {
     int nRet;
-
     ProgressCreate();
-
     nRet = BzipOpen(false);
-    printf("DoLibInit: BzipOpen = %i\n", nRet);
     if (nRet) {
         BzipClose();
         return 1;
     }
-
     NeoSystem = NeoSystemList[pemu_ui->getConfig()->get(PEMUConfig::OptId::EMU_NEOBIOS, true)->getArrayIndex()];
-
     nRet = BurnDrvInit();
-    printf("DoLibInit: BurnDrvInit = %i\n", nRet);
-
     BzipClose();
-
     if (nRet) {
         BurnDrvExit();
         return 1;
@@ -69,54 +54,38 @@ static int DoLibInit() {
     }
 }
 
-// Catch calls to BurnLoadRom() once the emulation has started;
-// Intialise the zip module before forwarding the call, and exit cleanly.
 static int DrvLoadRom(unsigned char *Dest, int *pnWrote, int i) {
     int nRet;
-
     BzipOpen(false);
-
     if ((nRet = BurnExtLoadRom(Dest, pnWrote, i)) != 0) {
         char szText[256];
         char *pszFilename;
         BurnDrvGetRomName(&pszFilename, i, 0);
         sprintf(szText, "Error loading %s for %s.\nEmulation will likely have problems.",
                 pszFilename, BurnDrvGetTextA(DRV_NAME));
-        printf("DrvLoadRom: %s\n", szText);
         pemu_ui->getUiMessageBox()->show("ERROR", szText, "OK");
     }
-
     BzipClose();
-
     BurnExtLoadRom = DrvLoadRom;
-
     return nRet;
 }
 
 int DrvInit(int nDrvNum, bool bRestore) {
-    printf("DrvInit(%i, %i)\n", nDrvNum, bRestore);
     DrvExit();
 
-    // set selected driver
+    // 关键：在 BurnDrvInit 前设置 Bpp 与颜色映射，避免驱动生成全黑调色板
+    nBurnBpp = 2;
+    BurnHighCol = myHighCol16;
+
     nBurnDrvSelect[0] = (UINT32) nDrvNum;
-    // for retro_input
     bIsNeogeoCartGame = ((BurnDrvGetHardwareCode() & HARDWARE_PUBLIC_MASK) == HARDWARE_SNK_NEOGEO);
-    // default input values
     nMaxPlayers = BurnDrvGetMaxPlayers();
     SetDefaultDeviceTypes();
-    // init inputs
     InputInit();
     SetControllerInfo();
 
-    printf("DrvInit: DoLibInit()\n");
-    if (DoLibInit()) {                // Init the Burn library's driver
-        //char szTemp[512];
-        //_stprintf(szTemp, _T("Error starting '%s'.\n"), BurnDrvGetText(DRV_FULLNAME));
-        //AppError(szTemp, 1);
-        return 1;
-    }
+    if (DoLibInit()) return 1;
 
-    printf("DrvInit: BurnExtLoadRom = DrvLoadRom\n");
     BurnExtLoadRom = DrvLoadRom;
 
     char path[1024];
@@ -126,11 +95,9 @@ int DrvInit(int nDrvNum, bool bRestore) {
     bDrvOkay = 1;
     nBurnLayer = 0xff;
     nSpriteEnable = 0xff;
-
     return 0;
 }
 
-// for uiStateMenu.cpp (BurnStateLoad)
 int DrvInitCallback() {
     return DrvInit((int) nBurnDrvSelect[0], false);
 }
@@ -145,11 +112,9 @@ int DrvExit() {
             BurnDrvExit();
         }
     }
-
     BurnExtLoadRom = nullptr;
     bDrvOkay = 0;
     nBurnDrvSelect[0] = ~0U;
-
     return 0;
 }
 
@@ -164,7 +129,6 @@ static int ProgressCreate() {
 
 int ProgressUpdateBurner(double dProgress, const TCHAR *pszText, bool bAbs) {
     pemu_ui->getUiProgressBox()->setTitle(BurnDrvGetTextA(DRV_FULLNAME));
-
     if (pszText) {
         nProgressPosBurn += dProgress;
         pemu_ui->getUiProgressBox()->setMessage(pszText);
@@ -172,20 +136,20 @@ int ProgressUpdateBurner(double dProgress, const TCHAR *pszText, bool bAbs) {
     } else {
         pemu_ui->getUiProgressBox()->setMessage("Please wait...");
     }
-
     pemu_ui->flip();
-
     return 0;
 }
 
 int AppError(TCHAR *szText, int bWarning) {
-    //ui->getUiMessageBox()->show("ERROR", szText ? szText : "UNKNOW ERROR", "OK");
     return 1;
 }
 
 #ifdef __PFBN_LIGHT__
-
 void nes_add_cheat(char *code) {};
-
 void nes_remove_cheat(char *code) {};
 #endif
+
+extern bool g_video_needs_reinit;
+void ReinitialiseVideo(void) {
+    g_video_needs_reinit = true;
+}

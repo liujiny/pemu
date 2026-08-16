@@ -9,8 +9,9 @@
 using namespace c2d;
 using namespace pemu;
 
+// 关键：显式指定 RGB565 格式
 PFBAVideo::PFBAVideo(UiMain *ui, uint8_t **_pixels, int *_pitch, const c2d::Vector2i &size, const c2d::Vector2i &aspect)
-        : C2DUIVideo(ui, _pixels, _pitch, size, aspect) {
+        : C2DUIVideo(ui, _pixels, _pitch, size, aspect, c2d::Texture::Format::RGB565) {
 }
 
 void PFBAVideo::updateScaling(bool vertical, bool flip) {
