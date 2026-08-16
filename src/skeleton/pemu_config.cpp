@@ -117,7 +117,8 @@ PEMUConfig::PEMUConfig(Renderer *renderer, const std::string &name, int version)
     }
     
     // [连发菜单项 / Autofire Menu Option] 在菜单中加入 AUTOFIRE 选项（默认 OFF，索引 0）
-    emu_grp.addOption({"AUTOFIRE", {"OFF", "ON"}, 0, EMU_AUTOFIRE});
+    emu_grp.addOption({"AUTOFIRE_A", {"OFF", "ON"}, 1, EMU_AUTOFIRE_A});
+    emu_grp.addOption({"AUTOFIRE_B", {"OFF", "ON"}, 0, EMU_AUTOFIRE_B});
     // [作弊开关选项 / Cheats Option] 默认设为 1 (ON)
     emu_grp.addOption({"CHEATS", {"OFF", "ON"}, 1, EMU_CHEATS});
 

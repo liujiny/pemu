@@ -552,32 +552,6 @@ bool PFBAUiEmu::onInput(c2d::Input::Player *players) {
         return true;
     }
 
-    // ================= [ 连发脉冲引擎 / Autofire Pulse Engine ] =================
-    int autofireOpt = pMain->getConfig()->get(PEMUConfig::OptId::EMU_AUTOFIRE, true)->getInteger();
-    static int autofire_pulse_counter = 0;
-    autofire_pulse_counter++;
-    // 产生 2 帧通 / 2 帧断的高频脉冲（15Hz）
-    bool isPulseActive = (autofire_pulse_counter % 4) < 2;
-
-    for (int i = 0; i < 4; i++) {
-        // 1. □ 键 (Button::X) 设为专属连发攻击键 (Turbo Attack)
-        if (players[i].buttons & Input::Button::X) {
-            if (isPulseActive) {
-                players[i].buttons |= Input::Button::A;
-            } else {
-                players[i].buttons &= ~Input::Button::A;
-            }
-        }
-
-        // 2. 当配置中 AUTOFIRE 开启时，按住 ✕ 键 (Button::A) 自动产生连发脉冲
-        if (autofireOpt && (players[i].buttons & Input::Button::A)) {
-            if (!isPulseActive) {
-                players[i].buttons &= ~Input::Button::A;
-            }
-        }
-    }
-    // ============================================================================
-
     int rotation = getUi()->getConfig()->get(PEMUConfig::OptId::EMU_ROTATION, true)->getArrayIndex();
     if (BurnDrvGetFlags() & BDF_ORIENTATION_VERTICAL) {
         if (rotation == 0) pMain->getInput()->setRotation(Input::Rotation::R90, Input::Rotation::R0);
