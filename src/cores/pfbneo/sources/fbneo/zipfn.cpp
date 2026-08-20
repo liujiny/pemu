@@ -1,3 +1,11 @@
+#include <strings.h>
+#ifndef stricmp
+#define stricmp strcasecmp
+#endif
+#ifndef _stricmp
+#define _stricmp strcasecmp
+#endif
+
 // Zip module
 #include <zlib.h>
 #include "burner.h"
