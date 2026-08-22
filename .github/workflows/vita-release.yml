@@ -18,13 +18,16 @@ jobs:
 
     - name: Setup VitaSDK (配置 Vita 工具链)
       run: |
-        wget https://github.com/vitasdk/autobuilds/releases/download/master-linux-v2.540/vitasdk-x86_64-linux-gnu-2026-05-24_12-05-02.tar.bz2
-        sudo tar -xjvf vitasdk-x86_64-linux-gnu-2026-05-24_12-05-02.tar.bz2 -C /usr/local
+        wget https://github.com/vitasdk/autobuilds/releases/download/master-linux-v2.540/vitasdk-x86_64-linux-gnu.tar.bz2 || wget https://github.com/vitasdk/autobuilds/releases/download/master-linux-v2.541/vitasdk-x86_64-linux-gnu.tar.bz2
+        sudo tar -xjvf vitasdk-x86_64-linux-gnu.tar.bz2 -C /usr/local
         echo "VITASDK=/usr/local/vitasdk" >> $GITHUB_ENV
         echo "/usr/local/vitasdk/bin" >> $GITHUB_PATH
 
-    - name: Install CMake & Make (安装编译依赖)
-      run: sudo apt-get update && sudo apt-get install -y cmake make
+    - name: Install Dependencies & Tools (安装编译依赖与Vita库)
+      run: |
+        sudo apt-get update && sudo apt-get install -y cmake make
+        # 核心补充：使用 VitaSDK 的内置包管理器 pacman 安装图形和配置依赖库
+        sudo /usr/local/vitasdk/bin/pacman -Sy --noconfirm vita-freetype vita-libpng vita-zlib vita-libconfig
 
     - name: Configure CMake (配置构建环境)
       run: |
