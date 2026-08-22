@@ -1,73 +1,44 @@
-name: vita-release
+name: Build Vita Release
 
 on:
   push:
-    tags:
-      - "v*.*"
-  workflow_dispatch:
+    branches: [ master, main ]
+  workflow_dispatch: # 允许在 Actions 页面手动触发 (Manual Trigger)
 
 jobs:
-  build-vita-release:
+  build-vita:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: recursive
-      - name: Install build dependencies
-        run: |
-          sudo apt -yq update
-          sudo apt -yq install build-essential cmake git zip curl
+    - name: Checkout Repository (检出代码)
+      uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0 # 核心修复点：禁用浅克隆，拉取完整历史记录以匹配特定的子模块 Commit
 
-      - name: Install vita toolchain
-        run: |
-          export VITASDK=/usr/local/vitasdk
-          export PATH=$VITASDK/bin:$PATH
-          wget -q https://github.com/vitasdk/autobuilds/releases/download/master-linux-v2.540/vitasdk-x86_64-linux-gnu-2026-05-24_12-05-02.tar.bz2
-          sudo tar -xjf vitasdk-x86_64-linux-gnu-2026-05-24_12-05-02.tar.bz2 -C /usr/local/
-          vdpm libvita2d freetype bzip2 libpng libconfig zlib sdl2 curl openssl tinyxml2 libarchive minizip zstd xz
+    - name: Setup VitaSDK (配置 Vita 工具链)
+      run: |
+        wget https://github.com/vitasdk/autobuilds/releases/latest/download/vitasdk-x86_64-linux-gnu.tar.bz2
+        sudo tar -xjvf vitasdk-x86_64-linux-gnu.tar.bz2 -C /usr/local
+        echo "VITASDK=/usr/local/vitasdk" >> $GITHUB_ENV
+        echo "/usr/local/vitasdk/bin" >> $GITHUB_PATH
 
-      - name: Configure
-        run: |
-          cd $GITHUB_WORKSPACE
-          export VITASDK=/usr/local/vitasdk
-          mkdir cmake-build && cd cmake-build
-          cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release .. \
-            -DPLATFORM_VITA=ON -DOPTION_MPV_PLAYER=OFF
+    - name: Install CMake & Make (安装编译依赖)
+      run: sudo apt-get update && sudo apt-get install -y cmake make
 
-      - name: Build pfbneo
-        run: |
-          cd $GITHUB_WORKSPACE/cmake-build
-          make pfbneo.deps
-          make pfbneo.vpk
-          mv src/cores/pfbneo/pfbneo.vpk $GITHUB_WORKSPACE
+    - name: Configure CMake (配置构建环境)
+      run: |
+        mkdir build-vita && cd build-vita
+        cmake -DCMAKE_TOOLCHAIN_FILE="/usr/local/vitasdk/share/vita.toolchain.cmake" -DPLATFORM_VITA=ON ..
 
-      - name: Build pgen
-        run: |
-          cd $GITHUB_WORKSPACE/cmake-build
-          make pgen.vpk
-          mv src/cores/pgen/pgen.vpk $GITHUB_WORKSPACE
+    - name: Build FBNeo Deps (编译核心依赖)
+      run: cd build-vita && make pfbneo.deps
 
-      - name: Build pnes
-        run: |
-          cd $GITHUB_WORKSPACE/cmake-build
-          make pnes.vpk
-          mv src/cores/pnes/pnes.vpk $GITHUB_WORKSPACE
+    - name: Build Project (多线程编译主程序)
+      run: cd build-vita && make -j$(nproc)
 
-      - name: Build psnes
-        run: |
-          cd $GITHUB_WORKSPACE/cmake-build
-          make psnes.vpk
-          mv src/cores/psnes/psnes.vpk $GITHUB_WORKSPACE
-
-      - name: Build pgba
-        run: |
-          cd $GITHUB_WORKSPACE/cmake-build
-          make pgba.vpk
-          mv src/cores/pgba/pgba.vpk $GITHUB_WORKSPACE
-
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        if: ${{ startsWith(github.ref, 'refs/tags/') && !env.ACT }}
-        with:
-          files: '*.vpk'
-          token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Upload Artifact (上传成品安装包)
+      uses: actions/upload-artifact@v3
+      with:
+        name: pfbneo-vita-release
+        path: build-vita/**/*.vpk # 自动抓取编译生成的 vpk 格式文件
