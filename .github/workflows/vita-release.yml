@@ -18,7 +18,7 @@ jobs:
 
     - name: Setup VitaSDK (配置 Vita 工具链)
       run: |
-        wget https://github.com/vitasdk/autobuilds/releases/latest/download/vitasdk-x86_64-linux-gnu-2026-05-24_12-05-02.tar.bz2
+        wget https://github.com/vitasdk/autobuilds/releases/download/master-linux-v2.540/vitasdk-x86_64-linux-gnu-2026-05-24_12-05-02.tar.bz2
         sudo tar -xjvf vitasdk-x86_64-linux-gnu-2026-05-24_12-05-02.tar.bz2 -C /usr/local
         echo "VITASDK=/usr/local/vitasdk" >> $GITHUB_ENV
         echo "/usr/local/vitasdk/bin" >> $GITHUB_PATH
