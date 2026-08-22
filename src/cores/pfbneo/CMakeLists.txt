@@ -113,20 +113,26 @@ set(INTF_DIRS
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/cd
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/cd/sdl
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/audio
-        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/video
-        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/video/scalers
 )
 file(GLOB SRC_INTF
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/*.cpp
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/cd/*.cpp
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/cd/sdl/*.cpp
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/audio/*.cpp
-        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/video/vid_interface.cpp
-        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/video/vid_support.cpp
-        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/video/vid_softfx.cpp
-        ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/video/scalers/*.cpp
-        
 )
+
+# The pemu frontend supplies its own video path on Vita.  Keep FBNeo's
+# desktop/SDL video frontend for the other platforms that already used it.
+if (NOT PLATFORM_VITA)
+    file(GLOB SRC_INTF_VIDEO
+            ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/video/vid_interface.cpp
+            ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/video/vid_support.cpp
+            ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/video/vid_softfx.cpp
+            ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/video/scalers/*.cpp
+    )
+    list(APPEND SRC_INTF ${SRC_INTF_VIDEO})
+endif ()
+
 list(REMOVE_ITEM SRC_INTF
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/audio/aud_dsp.cpp
         ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/audio/aud_interface.cpp
@@ -230,7 +236,37 @@ set(FLAGS
 
 set(CMAKE_CXX_STANDARD 17)
 
-if (PLATFORM_PS4)
+#################
+# PSP2 (PS Vita)
+#################
+if (PLATFORM_VITA)
+    enable_language(ASM)
+    set(TITLE_ID "PFBN00001" CACHE STRING "" FORCE)
+
+    # Restore the original pemu Vita CPU path: Cyclone 68000 + ARM speed hacks.
+    list(APPEND INC sources/cpu/cyclone)
+    list(REMOVE_ITEM SRC_CPU
+            ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/cpu/m68000_intf.cpp)
+    list(APPEND SRC_PFBA
+            sources/cpu/c68000_intf.cpp
+            sources/cpu/cyclone/Cyclone.s)
+
+    list(APPEND FLAGS
+            -DBUILD_C68K
+            -DUSE_FILE32API
+            -DUSE_SPEEDHACKS
+            -D__PFBA_ARM__)
+
+    # VitaSDK uses static libstdc++/libpthread.  Force the pthread archive into
+    # the ELF so pthread_once/pthread_key_* remain available even when a later
+    # libstdc++.a introduces those references.
+    list(APPEND LDFLAGS
+            ScePower_stub
+            "-Wl,--whole-archive"
+            pthread
+            "-Wl,--no-whole-archive")
+
+elseif (PLATFORM_PS4)
     set(PS4_PKG_TITLE "pFBN - Portable Final Burn Neo")
     set(PS4_PKG_TITLE_ID "PFBN00001")
     set(PS4_PKG_VERSION "${VERSION_MAJOR}.${VERSION_MINOR}")

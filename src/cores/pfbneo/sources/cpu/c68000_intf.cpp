@@ -1039,6 +1039,30 @@ INT32 SekShouldInterrupt()
     }
 }
 
+// Return the currently asserted 68K IRQ level.
+// Newer FBNeo Megadrive code calls this directly.  The original pFBN
+// Cyclone wrapper predates that API, so expose Cyclone's irq field here.
+INT32 SekGetIRQLevel()
+{
+#if defined FBNEO_DEBUG
+    if (!DebugCPU_SekInitted) bprintf(PRINT_ERROR, _T("SekGetIRQLevel called without init\n"));
+    if (nSekActive == -1) bprintf(PRINT_ERROR, _T("SekGetIRQLevel called when no CPU open\n"));
+#endif
+
+    if (nSekActive < 0) {
+        return 0;
+    }
+
+#ifdef EMU_C68K
+    if ((nSekCpuCore == SEK_CORE_C68K) && nSekCPUType[nSekActive] == 0x68000) {
+        return c68k[nSekActive].irq;
+    }
+#endif
+
+    // Fallback for any non-Cyclone path represented by this wrapper.
+    return nSekIRQPending[nSekActive] & 7;
+}
+
 void SekBurnUntilInt()
 {
     if(nSekCpuCore == SEK_CORE_M68K) {

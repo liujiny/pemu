@@ -22,13 +22,23 @@ using namespace c2d;
 using namespace pemu;
 
 TCHAR szAppCheatsPath[MAX_PATH] = {0};
-// 
-// int nVidFullscreen = 0; (Defined in vid_interface.cpp)
-// INT32 bVidUseHardwareGamma = 1; (Defined in vid_interface.cpp)
-bool g_video_needs_reinit = false;
 
-// UINT32 (__cdecl *VidHighCol)(INT32 r, INT32 g, INT32 b, INT32 i);
-// INT32 VidRecalcPal() { return BurnRecalcPal(); (Defined in vid_interface.cpp) }
+// Vita uses pemu's own video frontend and deliberately does not compile
+// FBNeo's vid_interface.cpp.  Provide the small compatibility surface that
+// burner/misc.cpp expects without pulling the SDL video plugins back in.
+#ifdef __VITA__
+INT32 nVidFullscreen = 0;
+INT32 bVidUseHardwareGamma = 1;
+UINT32 (__cdecl *VidHighCol)(INT32 r, INT32 g, INT32 b, INT32 i) = nullptr;
+
+INT32 VidRecalcPal() {
+    // FBNeo's BurnRecalcPal() calls this hook before selecting VidHighCol.
+    // pemu does not need a separate frontend palette cache on Vita.
+    return 0;
+}
+#endif
+
+bool g_video_needs_reinit = false;
 
 #ifdef __PFBA_ARM__
 extern int nSekCpuCore;
