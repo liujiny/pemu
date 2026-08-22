@@ -3,7 +3,7 @@ name: Build Vita Release
 on:
   push:
     branches: [ master, main ]
-  workflow_dispatch: # 允许在 Actions 页面手动触发 (Manual Trigger)
+  workflow_dispatch:
 
 jobs:
   build-vita:
@@ -11,10 +11,10 @@ jobs:
     
     steps:
     - name: Checkout Repository (检出代码)
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4  # 已经更新为 v4
       with:
         submodules: recursive
-        fetch-depth: 0 # 核心修复点：禁用浅克隆，拉取完整历史记录以匹配特定的子模块 Commit
+        fetch-depth: 0
 
     - name: Setup VitaSDK (配置 Vita 工具链)
       run: |
@@ -38,7 +38,7 @@ jobs:
       run: cd build-vita && make -j$(nproc)
 
     - name: Upload Artifact (上传成品安装包)
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4  # 已经更新为 v4
       with:
         name: pfbneo-vita-release
-        path: build-vita/**/*.vpk # 自动抓取编译生成的 vpk 格式文件
+        path: build-vita/**/*.vpk
