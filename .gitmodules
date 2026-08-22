@@ -9,10 +9,10 @@
 	url = https://github.com/Cpasjuste/sscrap.git
 [submodule "libcross2d"]
 	path = external/libcross2d
-	url = https://github.com/Cpasjuste/libcross2d.git
+	url = git@github.com:liujiny/libcross2d.git
 [submodule "cores/fbneo"]
 	path = external/cores/FBNeo
-	url = https://github.com/finalburnneo/FBNeo.git
+	url = git@github.com:liujiny/FBNeo.git
 [submodule "cores/genesis"]
 	path = external/cores/Genesis-Plus-GX
 	url = https://github.com/ekeeke/Genesis-Plus-GX.git
