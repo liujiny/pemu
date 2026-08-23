@@ -4,12 +4,21 @@
 
 #include "main.h"
 
+#ifdef __VITA__
+#include <psp2/power.h>
+#endif
+
 using namespace c2d;
 using namespace pemu;
 
 PEMUUiMain *pemu_ui;
 
 int main(int argc, char **argv) {
+
+#ifdef __VITA__
+    // Vita CPU overclock for emulator performance
+    scePowerSetArmClockFrequency(444);
+#endif
     // command line game info
     Game game;
 
