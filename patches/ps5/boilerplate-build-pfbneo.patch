@@ -1,23 +1,59 @@
 diff --git a/tools/build-pfbneo.sh b/tools/build-pfbneo.sh
 --- a/tools/build-pfbneo.sh
 +++ b/tools/build-pfbneo.sh
-@@ -191,12 +191,17 @@
-     [[ $archive =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.a$ && -f $root/$archive ]] || {
+@@ -111,12 +111,16 @@
+ definitions=()
+ includes=()
+ archives=()
++shared_inputs=()
++force_symbols=()
+ pacbrew_packages=()
+ pacbrew_includes=()
+ pacbrew_archives=()
+ [[ -z ${APP_DEFINITIONS:-} ]] || read -r -a definitions <<< "$APP_DEFINITIONS"
+ [[ -z ${APP_INCLUDE_PATHS:-} ]] || read -r -a includes <<< "$APP_INCLUDE_PATHS"
+ [[ -z ${APP_STATIC_ARCHIVES:-} ]] || read -r -a archives <<< "$APP_STATIC_ARCHIVES"
++[[ -z ${APP_SHARED_INPUTS:-} ]] || read -r -a shared_inputs <<< "$APP_SHARED_INPUTS"
++[[ -z ${APP_FORCE_SYMBOLS:-} ]] || read -r -a force_symbols <<< "$APP_FORCE_SYMBOLS"
+ [[ -z ${PACBREW_PACKAGES:-} ]] || read -r -a pacbrew_packages <<< "$PACBREW_PACKAGES"
+ [[ -z ${PACBREW_INCLUDE_PATHS:-} ]] || read -r -a pacbrew_includes <<< "$PACBREW_INCLUDE_PATHS"
+ [[ -z ${PACBREW_STATIC_ARCHIVES:-} ]] || read -r -a pacbrew_archives <<< "$PACBREW_STATIC_ARCHIVES"
+@@ -187,12 +191,32 @@
+ 
+ link_inputs=("$build/obj/app_crt.o" "$build/obj/app_cpp_runtime.o" "${objects[@]}")
++if (( ${#archives[@]} > 0 )); then
++    link_inputs+=(--start-group)
++fi
+ for archive in "${archives[@]}"; do
+-    [[ $archive =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.a$ && -f $root/$archive ]] || {
++    [[ $archive =~ ^[A-Za-z0-9_.+-]+(/[A-Za-z0-9_.+-]+)*\.a$ && -f $root/$archive ]] || {
          echo "invalid static archive: $archive" >&2; exit 2;
      }
--    link_inputs+=("$root/$archive")
-+    link_inputs+=(--start-group "$root/$archive")
+     link_inputs+=("$root/$archive")
  done
 +if (( ${#archives[@]} > 0 )); then
 +    link_inputs+=(--end-group)
 +fi
++for input in "${shared_inputs[@]}"; do
++    [[ $input =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.so$ && -f $root/$input ]] || {
++        echo "invalid shared link input: $input" >&2; exit 2;
++    }
++    link_inputs+=("$root/$input")
++done
++for symbol in "${force_symbols[@]}"; do
++    [[ $symbol =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
++        echo "invalid forced symbol: $symbol" >&2; exit 2;
++    }
++    link_inputs+=(-u "$symbol")
++done
  if (( ${#pacbrew_libs[@]} > 0 )); then
      link_inputs+=(--start-group "${pacbrew_libs[@]}" --end-group)
  fi
  "$sdk_root/bin/prospero-lld" -T "$native/ps5-pie.ld" --eh-frame-hdr \
 +    --wrap=malloc --wrap=calloc --wrap=realloc --wrap=free \
 +    --wrap=posix_memalign --wrap=malloc_usable_size \
++    -L "$root/.local/lib" \
++    -L "$sdk_root/target/lib" \
      --version-script "$native/app-symbols.map" \
      -e _start -o "$build/llvm-pie.elf" "${link_inputs[@]}" \
      --as-needed "$sdk_root"/target/lib/*.so
-

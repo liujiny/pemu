@@ -86,6 +86,9 @@ jobs:
         run: |
           git -C "$PS5_NATIVE_APP_TEMPLATE" checkout "$PS5_NATIVE_APP_COMMIT"
           test "$(git -C "$PS5_NATIVE_APP_TEMPLATE" rev-parse HEAD)" = "$PS5_NATIVE_APP_COMMIT"
+          chmod 0755 "$PS5_NATIVE_APP_TEMPLATE/tooling/prospero-clang18"
+          test -x "$PS5_NATIVE_APP_TEMPLATE/tooling/prospero-clang18"
+          echo "PFBNEO_BOILERPLATE_EXEC_MODE_NORMALIZATION=YES"
           echo "PS5_NATIVE_APP_COMMIT=$PS5_NATIVE_APP_COMMIT" >> "$GITHUB_ENV"
           echo "BOILERPLATE_STATUS=REPLACEMENT_CANDIDATE" >> "$GITHUB_ENV"
 
@@ -95,7 +98,7 @@ jobs:
         run: |
           export PATH="$RUNNER_TEMP/build-tools/bin:$PATH"
           echo "=== PS5 OpenGL build identity ==="
-          git -C "$GITHUB_WORKSPACE/ps5-opengl" rev-parse HEAD
+          echo "PS5_OPENGL_EXPECTED_COMMIT=$PS5_OPENGL_COMMIT"
           echo "PS5_PAYLOAD_SDK=$PS5_PAYLOAD_SDK"
           echo "LLVM_CONFIG=$LLVM_CONFIG"
           echo "PSBC_JOBS=$PSBC_JOBS"
@@ -115,8 +118,16 @@ jobs:
           "$PS5_PAYLOAD_SDK/bin/prospero-cmake" --version || true
           git clone https://github.com/blackbearreloaded/ps5-opengl.git "$GITHUB_WORKSPACE/ps5-opengl"
           git -C "$GITHUB_WORKSPACE/ps5-opengl" checkout "$PS5_OPENGL_COMMIT"
-          test "$(git -C "$GITHUB_WORKSPACE/ps5-opengl" rev-parse HEAD)" = "$PS5_OPENGL_COMMIT"
-          git -C "$GITHUB_WORKSPACE/ps5-opengl" rev-parse HEAD
+          ACTUAL_PS5_OPENGL_COMMIT=$(git -C "$GITHUB_WORKSPACE/ps5-opengl" rev-parse HEAD)
+          echo "PS5_OPENGL_ACTUAL_COMMIT=$ACTUAL_PS5_OPENGL_COMMIT"
+          test "$ACTUAL_PS5_OPENGL_COMMIT" = "$PS5_OPENGL_COMMIT"
+          echo "PS5_OPENGL_UPSTREAM_COMMIT=$ACTUAL_PS5_OPENGL_COMMIT"
+          echo "PFBNEO_PS5_OPENGL_AUDIT_PATCH=YES"
+          git -C "$GITHUB_WORKSPACE/ps5-opengl" apply --check \
+            "$GITHUB_WORKSPACE/patches/ps5/ps5-opengl-capability-audit.patch"
+          git -C "$GITHUB_WORKSPACE/ps5-opengl" apply \
+            "$GITHUB_WORKSPACE/patches/ps5/ps5-opengl-capability-audit.patch"
+          git -C "$GITHUB_WORKSPACE/ps5-opengl" diff --check
           make -C "$GITHUB_WORKSPACE/ps5-opengl" source-fetch
           make -C "$GITHUB_WORKSPACE/ps5-opengl" sdk
           export PS5_OPENGL_PREFIX="$GITHUB_WORKSPACE/ps5-opengl/build/sdk/ps5-opengl-core33"
@@ -163,6 +174,8 @@ jobs:
           cd $GITHUB_WORKSPACE
           git -C external/libcross2d apply patches/ps5/libcross2d-ps5-opengl.patch
           git -C external/libcross2d diff --check
+          git -C external/cores/FBNeo apply patches/ps5/fbneo-ps5-native-video-owner.patch
+          git -C external/cores/FBNeo diff --check
           mkdir build-pemu && cd build-pemu
           "$PS5_PAYLOAD_SDK/bin/prospero-cmake" \
             -DPLATFORM_PS5=ON \

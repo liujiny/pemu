@@ -1,0 +1,12 @@
+diff --git a/src/intf/video/vid_interface.cpp b/src/intf/video/vid_interface.cpp
+--- a/src/intf/video/vid_interface.cpp
++++ b/src/intf/video/vid_interface.cpp
+@@ -54,7 +54,7 @@ static struct VidOut *pVidOut[] = {
+ 
+ #define VID_LEN (sizeof(pVidOut) / sizeof(pVidOut[0]))
+ 
+-INT64 nVidBlitterOpt[VID_LEN] = {0, };			// Options for the blitter module (meaning depens on module)
++INT64 nVidBlitterOpt[VID_LEN ? VID_LEN : 1] = {0, };	// Options for the blitter module (meaning depens on module)
+ 
+ static InterfaceInfo VidInfo = { NULL, NULL, NULL };
+ 

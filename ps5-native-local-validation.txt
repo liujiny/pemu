@@ -1,0 +1,33 @@
+Payload SDK=v0.42
+Payload SDK SHA256=8cfbc7cd5811e719eb4f0c47eea668d3dc7b40bc8ab11c4a5031d40c23ec02da
+
+boilerplate=722f2227a8bb6fa2229120546995b6562552c752
+boilerplate status=REPLACEMENT_CANDIDATE
+boilerplate exec-mode normalization=YES
+
+ps5-opengl=7f9bfabdddb187a11e4401058eba8c9e55194d0a
+SDL=8c56053f13ca13a0c050de613706ff69eb615836
+
+LOCAL_OPENGL_BUILD=PASS
+LOCAL_SDL_BRIDGE=PASS
+LOCAL_PFBNEO_CONFIGURE=PASS
+LOCAL_PFBNEO_NATIVE_CORE=PASS
+LOCAL_NATIVE_PACKAGE=PASS
+
+AGC_STUB_POLICY=PASS (official ps5-opengl SDK import stubs only; no fake implementation)
+ALLOCATOR_AUDIT=PASS (malloc calloc realloc free posix_memalign malloc_usable_size)
+PRESENTATION_AUDIT=PASS (single SDL2/EGL/ps5-opengl VideoOut owner)
+OSMESA_AUDIT=PASS
+SDL2MAIN_AUDIT=PASS
+MAIN_SYMBOL_AUDIT=PASS (one native main and one _start; no SDL_main/WinMain)
+VIDEOOUT_OWNER_AUDIT=PASS (ps5-opengl presenter imports only)
+
+eboot.bin SHA256=ab021e4651f4f1c52030244267a2dd996852aed968ff6e723d4aa4cc970d6480
+libc.prx SHA256=e6ff45d16adf687855cc3b33b0c8a4132b6504360b221e0a34c7e99fb3ba0036
+
+REBUILD_NATIVE_CORE_SECONDS=1.12
+EBOOT_REPRODUCIBLE=YES
+LIBC_REPRODUCIBLE=YES
+
+FBNEO_SUBMODULE=DIRTY_BUT_REPRODUCIBLE via patches/ps5/fbneo-ps5-native-video-owner.patch
+LIBCROSS2D_SUBMODULE=DIRTY_BUT_REPRODUCIBLE via patches/ps5/libcross2d-ps5-opengl.patch

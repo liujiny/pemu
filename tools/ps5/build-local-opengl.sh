@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+pemu_root=$(cd "$script_dir/../.." && pwd)
 dev_root=${PS5DEV_ROOT:-"$HOME/ps5dev"}
 template="$dev_root/ps5-native-app-boilerplate"
 opengl="$dev_root/ps5-opengl"
@@ -28,5 +30,15 @@ flex --version
 
 cd "$opengl"
 test "$(git rev-parse HEAD)" = 7f9bfabdddb187a11e4401058eba8c9e55194d0a
+audit_patch="$pemu_root/patches/ps5/ps5-opengl-capability-audit.patch"
+echo "PS5_OPENGL_UPSTREAM_COMMIT=$(git rev-parse HEAD)"
+echo "PFBNEO_PS5_OPENGL_AUDIT_PATCH=YES"
+if git apply --reverse --check "$audit_patch" >/dev/null 2>&1; then
+    echo "PS5 OpenGL capability audit patch already applied"
+else
+    git apply --check "$audit_patch"
+    git apply "$audit_patch"
+fi
+git diff --check
 make source-fetch
 make sdk
