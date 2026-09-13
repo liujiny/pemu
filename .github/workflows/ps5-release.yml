@@ -94,8 +94,17 @@ jobs:
           PS5_OPENGL_COMMIT: 7f9bfabdddb187a11e4401058eba8c9e55194d0a
         run: |
           export PATH="$RUNNER_TEMP/build-tools/bin:$PATH"
-          python3 -c "import mako, yaml, packaging; print('python build deps OK')"
+          echo "=== PS5 OpenGL build identity ==="
+          git -C "$GITHUB_WORKSPACE/ps5-opengl" rev-parse HEAD
+          echo "PS5_PAYLOAD_SDK=$PS5_PAYLOAD_SDK"
+          echo "LLVM_CONFIG=$LLVM_CONFIG"
+          echo "PSBC_JOBS=$PSBC_JOBS"
+          python3 --version
           meson --version
+          "$LLVM_CONFIG" --version
+          clang-18 --version
+          clang-21 --version
+          python3 -c "import mako, yaml, packaging; print('python build deps OK')"
           llvm-config-21 --version
           glslangValidator --version
           spirv-as --version

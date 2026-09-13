@@ -1,0 +1,7 @@
+RUN_ID=34743985674
+COMMIT=4e1e645a9b289b8a084cb21fb5ab7a3a289b1a24
+FAILED_STEP=Build pinned ps5-opengl SDK
+FIRST_REAL_ERROR=UNAVAILABLE: GitHub Actions job-log endpoint returned HTTP 403 "Must have admin rights to Repository" for job 103688363596
+LOG_SOURCE=https://github.com/liujiny/pemu/actions/runs/34743985674
+LOG_JOB=https://github.com/liujiny/pemu/actions/runs/34743985674/job/103688363596
+NOTE=Exit status was not recorded as the root cause; no source or build workaround was applied.
