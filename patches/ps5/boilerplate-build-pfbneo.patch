@@ -1,0 +1,23 @@
+diff --git a/tools/build-pfbneo.sh b/tools/build-pfbneo.sh
+--- a/tools/build-pfbneo.sh
++++ b/tools/build-pfbneo.sh
+@@ -191,12 +191,17 @@
+     [[ $archive =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.a$ && -f $root/$archive ]] || {
+         echo "invalid static archive: $archive" >&2; exit 2;
+     }
+-    link_inputs+=("$root/$archive")
++    link_inputs+=(--start-group "$root/$archive")
+ done
++if (( ${#archives[@]} > 0 )); then
++    link_inputs+=(--end-group)
++fi
+ if (( ${#pacbrew_libs[@]} > 0 )); then
+     link_inputs+=(--start-group "${pacbrew_libs[@]}" --end-group)
+ fi
+ "$sdk_root/bin/prospero-lld" -T "$native/ps5-pie.ld" --eh-frame-hdr \
++    --wrap=malloc --wrap=calloc --wrap=realloc --wrap=free \
++    --wrap=posix_memalign --wrap=malloc_usable_size \
+     --version-script "$native/app-symbols.map" \
+     -e _start -o "$build/llvm-pie.elf" "${link_inputs[@]}" \
+     --as-needed "$sdk_root"/target/lib/*.so
+

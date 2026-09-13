@@ -4,6 +4,55 @@
 
 #include "pemu.h"
 
+#if defined(__PS5__)
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+static void configurePS5CrtShader(pemu::C2DUIVideo *video) {
+    static bool logged = false;
+    const char *mode = std::getenv("PEMU_CRT_MODE");
+    if (!mode || !*mode) mode = "CRT_CURRENT";
+    auto *shaderList = c2d_renderer ? c2d_renderer->getShaderList() : nullptr;
+    if (!shaderList) return;
+
+    const char *requested = "current";
+    const char *active = video->m_shader ? video->m_shader->name.c_str() : "none";
+    if (std::strcmp(mode, "CRT_OFF") == 0) {
+        requested = "c2d-texture";
+        video->setShader(requested);
+        active = video->m_shader ? video->m_shader->name.c_str() : "none";
+    } else if (std::strcmp(mode, "CRT_TEST_FAST") == 0) {
+        requested = "crt-zfast";
+        auto *fast = shaderList->get(requested);
+        if (fast && fast->available) {
+            video->setShader(requested);
+            active = video->m_shader ? video->m_shader->name.c_str() : "none";
+        } else {
+            std::printf("[PS5 CRT] requested=%s unavailable\n", requested);
+            requested = "crt-cgwg-fast";
+            fast = shaderList->get(requested);
+            if (fast && fast->available) {
+                video->setShader(requested);
+            } else {
+                std::printf("[PS5 CRT] fallback=%s unavailable\n", requested);
+                video->setShader("c2d-texture");
+            }
+            active = video->m_shader ? video->m_shader->name.c_str() : "none";
+            if (!logged) std::printf("[PS5 CRT] fallback=%s\n", requested);
+        }
+    }
+    if (!logged) {
+        std::printf("[PS5 CRT] mode=%s\n", mode);
+        if (std::strcmp(mode, "CRT_CURRENT") == 0 || std::strcmp(mode, "CRT_OFF") == 0)
+            std::printf("[PS5 CRT] active=%s\n", active);
+        else
+            std::printf("[PS5 CRT] requested=%s\n[PS5 CRT] active=%s\n", requested, active);
+        logged = true;
+    }
+}
+#endif
+
 UiEmu::UiEmu(UiMain *u) : RectangleShape(u->getSize()) {
     printf("UiEmu()\n");
 
@@ -36,6 +85,9 @@ void UiEmu::addVideo(C2DUIVideo *v) {
     delete (video);
     video = v;
     video->setShader(pMain->getConfig()->get(PEMUConfig::OptId::EMU_SHADER, true)->getArrayIndex());
+#if defined(__PS5__)
+    configurePS5CrtShader(video);
+#endif
     video->setFilter((Texture::Filter) pMain->getConfig()->get(PEMUConfig::OptId::EMU_FILTER, true)->getArrayIndex());
     video->updateScaling();
     add(video);

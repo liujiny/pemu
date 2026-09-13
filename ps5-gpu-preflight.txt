@@ -1,0 +1,26 @@
+CI_STATUS=NOT_RUN
+CI_BLOCKER=GitHub Actions has not been run; replacement candidate requires native build and folder artifact validation
+PAYLOAD_SDK=v0.42
+PAYLOAD_SDK_SHA256=8cfbc7cd5811e719eb4f0c47eea668d3dc7b40bc8ab11c4a5031d40c23ec02da
+PS5_OPENGL_COMMIT=7f9bfabdddb187a11e4401058eba8c9e55194d0a
+PS5_OPENGL_UPSTREAM_BOILERPLATE=4e1d1277dd0531a9a9df8c780e446b9cc26534dd
+PS5_OPENGL_UPSTREAM_BOILERPLATE_REACHABLE=NO
+PFBNEO_SELECTED_BOILERPLATE=722f2227a8bb6fa2229120546995b6562552c752
+BOILERPLATE_STATUS=REPLACEMENT_CANDIDATE
+PFBNEO_BOILERPLATE_DEVIATION=YES
+SDL_BRIDGE=ps5-opengl/integration/SDL2 (receipt not verified)
+OSMESA_PRESENT=UNKNOWN (final ELF audit not executed)
+SDL2MAIN_PRESENT=UNKNOWN (final ELF audit not executed)
+GL_VERSION_TARGET=OpenGL 3.3 Core
+GLSL_VERSION_TARGET=GLSL 3.30
+WINDOW_COUNT=1 (static: one SDL_CreateWindow call)
+GL_CONTEXT_COUNT=1 (static: one SDL_GL_CreateContext call)
+DRAWABLE=1920x1080 (runtime not verified)
+SWAP_INTERVAL=1
+STATIC_NATIVE_MODEL=A_CANDIDATE
+LAUNCH_MODEL=B
+ZIP_SHA256=UNKNOWN
+ALLOCATOR_WRAP_SET=complete
+READY_FOR_HARDWARE_TEST=NO
+BLOCKERS=CI not run; final native link/SELF inspect/folder artifact unavailable; hardware test forbidden until CI and artifact gates pass
+

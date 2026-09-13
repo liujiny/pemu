@@ -2,6 +2,8 @@ name: ps5-release
 
 on:
   push:
+    branches:
+      - ps5-gpu-opengl
     tags:
       - "v*.*"
   workflow_dispatch:
@@ -18,48 +20,276 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install bash clang-18 lld-18
-          sudo apt install build-essential cmake zip
+          sudo apt install -y bash clang-18 lld-18 llvm build-essential patch cmake ninja-build python3 zip unzip libglm-dev curl
 
       - name: Install toolchain
         run: |
-          wget https://github.com/ps5-payload-dev/pacbrew-repo/releases/latest/download/ps5-payload-dev.tar.gz
-          sudo tar xf ps5-payload-dev.tar.gz -C /
+          PAYLOAD_URL=https://github.com/ps5-payload-dev/pacbrew-repo/releases/download/v0.42/ps5-payload-dev.tar.gz
+          PAYLOAD_SHA=8cfbc7cd5811e719eb4f0c47eea668d3dc7b40bc8ab11c4a5031d40c23ec02da
+          curl -L --fail --retry 3 -o /tmp/ps5-payload-dev.tar.gz "$PAYLOAD_URL"
+          echo "$PAYLOAD_SHA  /tmp/ps5-payload-dev.tar.gz" | sha256sum -c -
+          export PS5_NATIVE_APP_TEMPLATE="$GITHUB_WORKSPACE/ps5-native-app-boilerplate"
+          git clone https://github.com/blackbearreloaded/ps5-native-app-boilerplate.git "$PS5_NATIVE_APP_TEMPLATE"
+          mkdir -p "$PS5_NATIVE_APP_TEMPLATE/.deps/native"
+          tar xf /tmp/ps5-payload-dev.tar.gz -C "$PS5_NATIVE_APP_TEMPLATE/.deps/native"
+          export PS5_PAYLOAD_SDK="$PS5_NATIVE_APP_TEMPLATE/.deps/native/ps5-payload-sdk"
+          test -x "$PS5_PAYLOAD_SDK/bin/prospero-clang"
+          echo "PS5_NATIVE_APP_TEMPLATE=$PS5_NATIVE_APP_TEMPLATE" >> "$GITHUB_ENV"
+          echo "PS5_PAYLOAD_SDK=$PS5_PAYLOAD_SDK" >> "$GITHUB_ENV"
+          echo "[PS5 BUILD] payload_sdk=$PS5_PAYLOAD_SDK"
+
+      - name: Checkout pinned native app boilerplate
+        env:
+          PS5_NATIVE_APP_COMMIT: 722f2227a8bb6fa2229120546995b6562552c752
+        run: |
+          git -C "$PS5_NATIVE_APP_TEMPLATE" checkout "$PS5_NATIVE_APP_COMMIT"
+          test "$(git -C "$PS5_NATIVE_APP_TEMPLATE" rev-parse HEAD)" = "$PS5_NATIVE_APP_COMMIT"
+          echo "PS5_NATIVE_APP_COMMIT=$PS5_NATIVE_APP_COMMIT" >> "$GITHUB_ENV"
+          echo "BOILERPLATE_STATUS=REPLACEMENT_CANDIDATE" >> "$GITHUB_ENV"
+
+      - name: Build pinned ps5-opengl SDK
+        env:
+          PS5_OPENGL_COMMIT: 7f9bfabdddb187a11e4401058eba8c9e55194d0a
+        run: |
+          echo "[PS5 BUILD] payload_sdk=$PS5_PAYLOAD_SDK"
+          "$PS5_PAYLOAD_SDK/bin/prospero-clang" --version || true
+          "$PS5_PAYLOAD_SDK/bin/prospero-cmake" --version || true
+          git clone https://github.com/blackbearreloaded/ps5-opengl.git "$GITHUB_WORKSPACE/ps5-opengl"
+          git -C "$GITHUB_WORKSPACE/ps5-opengl" checkout "$PS5_OPENGL_COMMIT"
+          test "$(git -C "$GITHUB_WORKSPACE/ps5-opengl" rev-parse HEAD)" = "$PS5_OPENGL_COMMIT"
+          git -C "$GITHUB_WORKSPACE/ps5-opengl" rev-parse HEAD
+          make -C "$GITHUB_WORKSPACE/ps5-opengl" source-fetch
+          make -C "$GITHUB_WORKSPACE/ps5-opengl" sdk
+          export PS5_OPENGL_PREFIX="$GITHUB_WORKSPACE/ps5-opengl/build/sdk/ps5-opengl-core33"
+          test -d "$PS5_OPENGL_PREFIX/include/GL"
+          test -d "$PS5_OPENGL_PREFIX/include/EGL"
+          test -d "$PS5_OPENGL_PREFIX/lib"
+          test -d "$PS5_OPENGL_PREFIX/lib/cmake/PS5OpenGLCore33"
+          test -d "$GITHUB_WORKSPACE/ps5-opengl/integration/SDL2"
+          echo "PS5_OPENGL_PREFIX=$PS5_OPENGL_PREFIX" >> "$GITHUB_ENV"
+
+      - name: Stage ps5-opengl SDL2 bridge prefix
+        run: |
+          git clone https://github.com/ps5-payload-dev/SDL.git "$GITHUB_WORKSPACE/SDL"
+          git -C "$GITHUB_WORKSPACE/SDL" checkout 8c56053f13ca13a0c050de613706ff69eb615836
+          python3 "$GITHUB_WORKSPACE/ps5-opengl/integration/SDL2/build.py" native \
+            --sdl-source "$GITHUB_WORKSPACE/SDL" \
+            --sdk-prefix "$PS5_OPENGL_PREFIX" \
+            --out "$GITHUB_WORKSPACE/ps5-opengl/build/native-sdl2" \
+            --payload-sdk "$PS5_PAYLOAD_SDK" \
+            --compiler-wrapper "$PS5_NATIVE_APP_TEMPLATE/tooling/prospero-clang18"
+          mkdir -p "$GITHUB_WORKSPACE/build-ps5-sdl2"
+          cp -a "$GITHUB_WORKSPACE/ps5-opengl/build/native-sdl2/." "$GITHUB_WORKSPACE/build-ps5-sdl2/"
+          export PS5_SDL_PREFIX="$GITHUB_WORKSPACE/build-ps5-sdl2/sdk"
+          test -f "$PS5_SDL_PREFIX/receipt.json" || test -f "$PS5_SDL_PREFIX/share/SDL2/receipt.json"
+          test -f "$PS5_SDL_PREFIX/manifest.sha256"
+          test -d "$PS5_SDL_PREFIX/include/SDL2"
+          test -d "$PS5_SDL_PREFIX/lib/cmake/SDL2"
+          test -f "$PS5_SDL_PREFIX/lib/libSDL2.a"
+          echo "[PS5 SDL] source=$GITHUB_WORKSPACE/ps5-opengl/integration/SDL2"
+          echo "[PS5 SDL] prefix=$PS5_SDL_PREFIX"
+          echo "PS5_SDL_PREFIX=$PS5_SDL_PREFIX" >> "$GITHUB_ENV"
+
+      - name: Resolve host glm CMake directory
+        run: |
+          GLM_CONFIG=$(dpkg -L libglm-dev | grep -m1 '/glmConfig.cmake$' || true)
+          test -n "$GLM_CONFIG"
+          GLM_DIR=$(dirname "$GLM_CONFIG")
+          echo "[PS5 GLM] config=$GLM_CONFIG"
+          echo "[PS5 GLM] dir=$GLM_DIR"
+          echo "GLM_DIR=$GLM_DIR" >> "$GITHUB_ENV"
 
       - name: Configure
         run: |
           cd $GITHUB_WORKSPACE
-          mkdir cmake-build && cd cmake-build
-          /opt/ps5-payload-sdk/bin/prospero-cmake -DPLATFORM_PS5=ON -DOPTION_MPV_PLAYER=OFF -DCMAKE_BUILD_TYPE=Release ..
+          git -C external/libcross2d apply patches/ps5/libcross2d-ps5-opengl.patch
+          git -C external/libcross2d diff --check
+          mkdir build-pemu && cd build-pemu
+          "$PS5_PAYLOAD_SDK/bin/prospero-cmake" \
+            -DPLATFORM_PS5=ON \
+            -DPS5_GPU_OPENGL=ON \
+            -DPS5_NATIVE_APP=ON \
+            -DPS5_NATIVE_APP_TEMPLATE="$PS5_NATIVE_APP_TEMPLATE" \
+            -DPS5_NATIVE_TITLE_ID=PPSA99998 \
+            -DPS5_OPENGL_PREFIX="$PS5_OPENGL_PREFIX" \
+            -DPS5_SDL_PREFIX="$PS5_SDL_PREFIX" \
+            -DPS5OpenGLCore33_DIR="$PS5_OPENGL_PREFIX/lib/cmake/PS5OpenGLCore33" \
+            -DSDL2_DIR="$PS5_SDL_PREFIX/lib/cmake/SDL2" \
+            -Dglm_DIR="$GLM_DIR" \
+            -DOPTION_MPV_PLAYER=OFF \
+            -DCMAKE_BUILD_TYPE=Release ..
+          if grep -Eiq 'OSMesa|libOSMesa' CMakeCache.txt; then
+            echo "OSMesa reference found in configure cache"
+            exit 1
+          fi
 
-      - name: Build pfbneo
+      - name: Build pfbneo native static inputs
         run: |
-          cd $GITHUB_WORKSPACE/cmake-build
+          cd $GITHUB_WORKSPACE/build-pemu
           make pfbneo.deps
-          make pfbneo_ps5_release
-          mv *.zip $GITHUB_WORKSPACE
+          make pfbneo_ps5_native_core
+
+      - name: Stage pfbneo native link inputs
+        run: |
+          set -euo pipefail
+          stage="$GITHUB_WORKSPACE/build/native-pfbneo"
+          rm -rf "$stage"
+          mkdir -p "$stage/.local/lib" "$stage/.local/include" "$stage/src" "$stage/assets"
+          for dir in sce_sys tooling runtime tools .deps; do
+            cp -a "$PS5_NATIVE_APP_TEMPLATE/$dir" "$stage/"
+          done
+          cp "$PS5_NATIVE_APP_TEMPLATE/Makefile" "$stage/Makefile"
+          rm -rf "$stage/src" "$stage/.local" "$stage/assets"
+          mkdir -p "$stage/src" "$stage/.local/lib" "$stage/.local/include" "$stage/.local/pemu-src" "$stage/assets"
+          cat > "$stage/src/native_entry_stub.cpp" <<'EOF'
+          extern "C" void pfbneo_native_link_anchor() {}
+          EOF
+          cp "$GITHUB_WORKSPACE/build-pemu/src/cores/pfbneo/libpfbneo_ps5_native.a" "$stage/.local/lib/"
+          find "$GITHUB_WORKSPACE/build-pemu" -type f \( -name 'libcross2d.a' -o -name 'libcross2dui.a' \) -exec cp {} "$stage/.local/lib/" \;
+          test -f "$stage/.local/lib/libpfbneo_ps5_native.a"
+          test -f "$stage/.local/lib/libcross2d.a"
+          test -f "$stage/.local/lib/libcross2dui.a"
+          for archive in "$stage"/.local/lib/*.a; do
+            file "$archive"
+            llvm-ar -t "$archive" >/dev/null
+          done
+          cp -a "$GITHUB_WORKSPACE/src/." "$stage/.local/pemu-src/"
+          for data_dir in \
+              "$GITHUB_WORKSPACE/build-pemu/src/cores/pfbneo/data_datadir" \
+              "$GITHUB_WORKSPACE/build-pemu/src/cores/pfbneo/data_romfs"; do
+            test ! -d "$data_dir" || cp -a "$data_dir/." "$stage/assets/"
+          done
+          printf '%s\n' '.local/lib/libpfbneo_ps5_native.a .local/lib/libcross2dui.a .local/lib/libcross2d.a' > "$stage/.local/native-archives.txt"
+
+      - name: Build boilerplate runtime and native package
+        run: |
+          set -euo pipefail
+          stage="$GITHUB_WORKSPACE/build/native-pfbneo"
+          cd "$stage"
+          make doctor
+          make init TITLE_ID=PPSA99998 APP_NAME="pFBNeo PS5 GPU Test"
+          make libc
+          test -f runtime/libc.prx
+          test -f sce_sys/param.json
+            APP_STATIC_ARCHIVES="$(cat .local/native-archives.txt)" \
+            PEMU_SOURCE_ROOT="$GITHUB_WORKSPACE" \
+            bash "$GITHUB_WORKSPACE/tools/ps5/native-build-pfbneo.sh" "$stage"
+          test -f "$stage/dist/PPSA99998/eboot.bin"
+          "$stage/build/host/ps5-native-tool" self --inspect \
+            --file "$stage/dist/PPSA99998/eboot.bin" \
+            > "$GITHUB_WORKSPACE/ps5-native-inspect.txt"
+          "$stage/build/host/ps5-native-tool" self --inspect \
+            --file "$stage/dist/PPSA99998/sce_module/libc.prx" \
+            >> "$GITHUB_WORKSPACE/ps5-native-inspect.txt"
+          (cd "$stage/dist" && zip -qr "$GITHUB_WORKSPACE/pfbneo-ps5-gpu-opengl-crt-baseline.zip" PPSA99998)
+          test -f "$GITHUB_WORKSPACE/pfbneo-ps5-gpu-opengl-crt-baseline.zip"
+          {
+            echo "pFBNeo archive sha256=$(sha256sum "$stage/.local/lib/libpfbneo_ps5_native.a" | awk '{print $1}')"
+            echo "libcross2d archive sha256=$(sha256sum "$stage/.local/lib/libcross2d.a" | awk '{print $1}')"
+            echo "SDL2 bridge archive sha256=$(sha256sum "$PS5_SDL_PREFIX/lib/libSDL2.a" | awk '{print $1}')"
+            echo "SDL receipt sha256=$(sha256sum "$PS5_SDL_PREFIX/share/SDL2/receipt.json" | awk '{print $1}')"
+            echo "ps5-opengl manifest sha256=$(sha256sum "$PS5_OPENGL_PREFIX/manifest.sha256" | awk '{print $1}')"
+            echo "PS5OpenGL runtime archive sha256=$(sha256sum "$PS5_OPENGL_PREFIX/lib/libps5_opengl_core33.a" | awk '{print $1}')"
+            echo "native boilerplate commit=$PS5_NATIVE_APP_COMMIT"
+            echo "Payload SDK version=v0.42"
+            echo "final llvm-pie.elf sha256=$(sha256sum "$stage/build/llvm-pie.elf" | awk '{print $1}')"
+            echo "final eboot.elf sha256=$(sha256sum "$stage/build/eboot.elf" | awk '{print $1}')"
+            echo "final eboot.bin sha256=$(sha256sum "$stage/dist/PPSA99998/eboot.bin" | awk '{print $1}')"
+          } > "$GITHUB_WORKSPACE/ps5-native-link-manifest.txt"
+
+      - name: Audit pfbneo PS5 GPU artifact
+        if: ${{ success() }}
+        run: |
+          set -euo pipefail
+          PFBA_ZIP="$GITHUB_WORKSPACE/pfbneo-ps5-gpu-opengl-crt-baseline.zip"
+          test -f "$PFBA_ZIP"
+          AUDIT_DIR=$(mktemp -d)
+          unzip -q "$PFBA_ZIP" -d "$AUDIT_DIR"
+          PFBA_ELF="$AUDIT_DIR/PPSA99998/eboot.bin"
+          test -f "$PFBA_ELF"
+          test -f "$AUDIT_DIR/PPSA99998/sce_sys/param.json"
+          test -f "$AUDIT_DIR/PPSA99998/sce_module/libc.prx"
+          test -d "$AUDIT_DIR/PPSA99998/assets"
+          if llvm-nm -uC "$PFBA_ELF" 2>&1 | grep -Eiq 'OSMesaCreateContext|OSMesaMakeCurrent|libOSMesa'; then
+            echo "OSMesa dependency found in $PFBA_ELF"
+            exit 1
+          fi
+          if strings "$PFBA_ELF" | grep -Eiq 'libOSMesa|OSMesaCreateContext|OSMesaMakeCurrent'; then
+            echo "OSMesa reference found in $PFBA_ELF"
+            exit 1
+          fi
+          if llvm-nm -uC "$PFBA_ELF" 2>&1 | grep -Eiq 'SDL2main|GLX|WGL'; then
+            echo "Forbidden desktop/software GL dependency found in $PFBA_ELF"
+            exit 1
+          fi
+          if strings "$PFBA_ELF" | grep -Eiq 'libOSMesa|SDL2main|libGLX|opengl32|WGL'; then
+            echo "Forbidden desktop/software GL string found in $PFBA_ELF"
+            exit 1
+          fi
+          test -n "$(find "$AUDIT_DIR" -type f | grep -Ei '/(shader|shaders|assets|config|data)/|\.glsl$|\.vert$|\.frag$' | head -1)"
+          echo "ZIP filename=$(basename "$PFBA_ZIP")"
+          sha256sum "$PFBA_ZIP"
+          stat -c 'ZIP size=%s bytes' "$PFBA_ZIP"
+          {
+            echo "pemu commit=$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+            echo "libcross2d base commit=$(git -C "$GITHUB_WORKSPACE/external/libcross2d" rev-parse HEAD)"
+            echo "libcross2d patch sha256=$(sha256sum "$GITHUB_WORKSPACE/patches/ps5/libcross2d-ps5-opengl.patch" | awk '{print $1}')"
+            echo "ps5-opengl commit=$(git -C "$GITHUB_WORKSPACE/ps5-opengl" rev-parse HEAD)"
+            echo "ps5-opengl prefix=$PS5_OPENGL_PREFIX"
+            echo "ps5 SDL2 prefix=$PS5_SDL_PREFIX"
+            echo "SDL2 receipt=$PS5_SDL_PREFIX/share/SDL2/receipt.json"
+            echo "SDL2 manifest=$PS5_SDL_PREFIX/manifest.sha256"
+            echo "payload SDK=$PS5_PAYLOAD_SDK"
+            echo "native app template=$PS5_NATIVE_APP_TEMPLATE"
+            echo "native app boilerplate commit=$(git -C "$PS5_NATIVE_APP_TEMPLATE" rev-parse HEAD)"
+            echo "BOILERPLATE_STATUS=REPLACEMENT_CANDIDATE"
+            echo "PS5_OPENGL_UPSTREAM_BOILERPLATE=4e1d1277dd0531a9a9df8c780e446b9cc26534dd"
+            echo "PS5_OPENGL_UPSTREAM_BOILERPLATE_REACHABLE=NO"
+            echo "PFBNEO_BOILERPLATE_DEVIATION=YES"
+            echo "ALLOCATOR_WRAP_SET=complete"
+            echo "pacbrew version=v0.42"
+            echo "pacbrew archive sha256=$(sha256sum /tmp/ps5-payload-dev.tar.gz | awk '{print $1}')"
+            echo "compiler=$($PS5_PAYLOAD_SDK/bin/prospero-clang --version | head -1)"
+            echo "cmake=$($PS5_PAYLOAD_SDK/bin/prospero-cmake --version | head -1)"
+            echo "build type=Release"
+            echo "renderer path=ps5-opengl SDL2 bridge"
+            echo "OSMesa audit=passed"
+            echo "ZIP filename=$(basename "$PFBA_ZIP")"
+            echo "ZIP sha256=$(sha256sum "$PFBA_ZIP" | awk '{print $1}')"
+          } > "$GITHUB_WORKSPACE/ps5-build-manifest.txt"
+          cat "$GITHUB_WORKSPACE/ps5-build-manifest.txt"
+
+      - name: Upload pfbneo PS5 GPU baseline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pfbneo-ps5-gpu-opengl-crt-baseline
+          path: |
+            pfbneo-*.zip
+            ps5-build-manifest.txt
+            ps5-native-inspect.txt
+            ps5-native-link-manifest.txt
 
       - name: Build pgen
         run: |
-          cd $GITHUB_WORKSPACE/cmake-build
+          cd $GITHUB_WORKSPACE/build-pemu
           make pgen_ps5_release
           mv *.zip $GITHUB_WORKSPACE
 
       - name: Build pnes
         run: |
-          cd $GITHUB_WORKSPACE/cmake-build
+          cd $GITHUB_WORKSPACE/build-pemu
           make pnes_ps5_release
           mv *.zip $GITHUB_WORKSPACE
 
       - name: Build psnes
         run: |
-          cd $GITHUB_WORKSPACE/cmake-build
+          cd $GITHUB_WORKSPACE/build-pemu
           make psnes_ps5_release
           mv *.zip $GITHUB_WORKSPACE
 
       - name: Build pgba
         run: |
-          cd $GITHUB_WORKSPACE/cmake-build
+          cd $GITHUB_WORKSPACE/build-pemu
           make pgba_ps5_release
           mv *.zip $GITHUB_WORKSPACE
 

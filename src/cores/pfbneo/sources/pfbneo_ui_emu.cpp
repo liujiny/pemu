@@ -451,6 +451,9 @@ int PFBAUiEmu::load(const ss_api::Game &game) {
     nBurnBpp = 2;
     BurnHighCol = myHighCol16;
     BurnRecalcPal();
+#if defined(__PS5__)
+    PS5Profiler::setGameInfo(size.x, size.y, nBurnPitch, "RGB565");
+#endif
     
     if (video) {
         delete video;
@@ -654,9 +657,18 @@ void PFBAUiEmu::onUpdate() {
     pBurnDraw = nullptr;
     frameskip++;
 
+#if defined(__PS5__)
+    PS5Profiler::beginFrame();
+    PS5Profiler::begin(PS5Profiler::Core);
+#endif
+
     if (frameskip > skip) {
         if (video && video->getTexture()) {
             video->getTexture()->lock(&pBurnDraw, &nBurnPitch, video->getTextureRect());
+#if defined(__PS5__)
+            PS5Profiler::setGameInfo(video->getTextureRect().width, video->getTextureRect().height,
+                                     nBurnPitch, "RGB565");
+#endif
         }
         nFramesRendered++;
     }
@@ -666,6 +678,9 @@ void PFBAUiEmu::onUpdate() {
     }
 
     BurnDrvFrame();
+#if defined(__PS5__)
+    PS5Profiler::end(PS5Profiler::Core);
+#endif
     nCurrentFrame++;
 
     if (frameskip > skip) {

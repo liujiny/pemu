@@ -280,10 +280,25 @@ set(SRC ${SRC_PFBA} ${SRC_CPU} ${SRC_DRV} ${SRC_BURN} ${SRC_BURNER} ${SRC_INTF} 
 #####################
 # pfbneo executable
 #####################
-add_executable(${PROJECT_NAME} ${SRC} ${CMAKE_CURRENT_BINARY_DIR}/deps/m68kops.c)
-target_compile_options(${PROJECT_NAME} PRIVATE ${FLAGS})
-target_include_directories(${PROJECT_NAME} PRIVATE ${INC})
-target_link_libraries(${PROJECT_NAME} cross2dui cross2d ${LDFLAGS})
+if (PLATFORM_PS5 AND PS5_NATIVE_APP)
+    add_library(${PROJECT_NAME}_ps5_native_core STATIC
+            ${SRC} ${CMAKE_CURRENT_BINARY_DIR}/deps/m68kops.c)
+    set_target_properties(${PROJECT_NAME}_ps5_native_core PROPERTIES
+            OUTPUT_NAME pfbneo_ps5_native)
+    set(PFBNEO_BUILD_TARGET ${PROJECT_NAME}_ps5_native_core)
+    add_custom_target(pfbneo_ps5_native DEPENDS ${PFBNEO_BUILD_TARGET})
+else ()
+    add_executable(${PROJECT_NAME} ${SRC} ${CMAKE_CURRENT_BINARY_DIR}/deps/m68kops.c)
+    set(PFBNEO_BUILD_TARGET ${PROJECT_NAME})
+endif ()
+target_compile_options(${PFBNEO_BUILD_TARGET} PRIVATE ${FLAGS})
+target_include_directories(${PFBNEO_BUILD_TARGET} PRIVATE ${INC})
+target_link_libraries(${PFBNEO_BUILD_TARGET} PRIVATE cross2dui cross2d ${LDFLAGS})
+
+if (PLATFORM_PS5 AND PS5_NATIVE_APP)
+    # The native boilerplate owns the CRT/FSELF conversion and runtime.  The
+    # complete allocation ABI bridge is added by the final native link.
+endif ()
 include(${CMAKE_SOURCE_DIR}/external/libcross2d/cmake/targets.cmake)
 
 # add common skin data
@@ -294,7 +309,7 @@ add_custom_target(${PROJECT_NAME}.data.skin
         COMMAND ${CMAKE_COMMAND} -D SRC=${CMAKE_SOURCE_DIR}/data/${TARGET_PLATFORM}/romfs -D DST=${CMAKE_CURRENT_BINARY_DIR}/data_romfs -P ${CMAKE_SOURCE_DIR}/external/libcross2d/cmake/copy_custom.cmake
 )
 add_dependencies(${PROJECT_NAME}.data.skin ${PROJECT_NAME}.data)
-add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}.data.skin)
+add_dependencies(${PFBNEO_BUILD_TARGET} ${PROJECT_NAME}.data.skin)
 
 # fbneo deps
 find_package(Perl REQUIRED)

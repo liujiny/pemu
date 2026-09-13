@@ -1,0 +1,622 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 919c84a..ae8e645 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -78,9 +78,23 @@ if (PLATFORM_VITA)
+ endif ()
+ 
+ if (PLATFORM_PS5)
+-    message(STATUS "C2D: SDL2 OpenGL 4.3 support enabled")
++    message(STATUS "C2D: SDL2 OpenGL support enabled")
+     set(OPTION_SDL2 ON CACHE BOOL "SDL2 support" FORCE)
+     set(OPTION_RENDER_GL2 ON CACHE BOOL "OpenGL 4.3 rendering" FORCE)
++    option(PS5_GPU_OPENGL "Use ps5-opengl Mesa/Gallium backend" OFF)
++    if (PS5_GPU_OPENGL)
++        set(PS5_OPENGL_PREFIX "" CACHE PATH "ps5-opengl SDK prefix")
++        set(PS5_SDL_PREFIX "" CACHE PATH "PS5 SDL2 bridge prefix")
++        if (NOT PS5_OPENGL_PREFIX OR NOT PS5_SDL_PREFIX)
++            message(FATAL_ERROR "PS5_GPU_OPENGL requires PS5_OPENGL_PREFIX and PS5_SDL_PREFIX")
++        endif ()
++        find_package(PS5OpenGLCore33 CONFIG REQUIRED)
++        list(APPEND C2D_LDFLAGS PS5OpenGLCore33::OpenGL)
++        list(APPEND C2D_CFLAGS -DC2D_PS5_MESA_GL -D__PS5__ -DNO_KEYBOARD)
++        message(STATUS "[PS5 BUILD] payload_sdk=$ENV{PS5_PAYLOAD_SDK}")
++        message(STATUS "[PS5 GL] prefix=${PS5_OPENGL_PREFIX}")
++        message(STATUS "C2D: PS5 ps5-opengl GL 3.3 Core backend enabled")
++    endif ()
+ endif ()
+ 
+ if (PLATFORM_PS4)
+@@ -157,12 +171,41 @@ if (OPTION_SDL1)
+ endif ()
+ 
+ if (OPTION_SDL2)
+-    pkg_search_module(SDL2 REQUIRED sdl2)
+-    list(APPEND C2D_INCLUDES ${SDL2_INCLUDE_DIRS})
++    if (PLATFORM_PS5 AND PS5_GPU_OPENGL)
++        set(SDL2_DIR "${PS5_SDL_PREFIX}/lib/cmake/SDL2" CACHE PATH "PS5 SDL2 bridge CMake directory" FORCE)
++        find_package(SDL2 CONFIG REQUIRED PATHS "${SDL2_DIR}" NO_DEFAULT_PATH)
++        if (TARGET SDL2::SDL2)
++            set(C2D_SDL2_TARGET SDL2::SDL2)
++        elseif (TARGET SDL2::SDL2-static)
++            set(C2D_SDL2_TARGET SDL2::SDL2-static)
++        else ()
++            message(FATAL_ERROR "PS5 SDL2 bridge did not export SDL2::SDL2 or SDL2::SDL2-static")
++        endif ()
++        get_target_property(SDL2_IMPORTED ${C2D_SDL2_TARGET} IMPORTED)
++        get_target_property(SDL2_INCLUDE_DIRS ${C2D_SDL2_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
++        get_target_property(SDL2_LIBRARY ${C2D_SDL2_TARGET} IMPORTED_LOCATION_RELEASE)
++        if (NOT SDL2_LIBRARY OR SDL2_LIBRARY MATCHES "-NOTFOUND$")
++            get_target_property(SDL2_LIBRARY ${C2D_SDL2_TARGET} IMPORTED_LOCATION_NOCONFIG)
++        endif ()
++        if (NOT SDL2_LIBRARY OR SDL2_LIBRARY MATCHES "-NOTFOUND$")
++            get_target_property(SDL2_LIBRARY ${C2D_SDL2_TARGET} IMPORTED_LOCATION)
++        endif ()
++        if (NOT SDL2_LIBRARY OR SDL2_LIBRARY MATCHES "-NOTFOUND$")
++            message(FATAL_ERROR "PS5 SDL2 bridge library location could not be resolved")
++        endif ()
++        message(STATUS "[PS5 SDL] cmake_dir=${SDL2_DIR}")
++        message(STATUS "[PS5 SDL] include=${SDL2_INCLUDE_DIRS}")
++        message(STATUS "[PS5 SDL] library=${SDL2_LIBRARY}")
++        message(STATUS "[PS5 SDL] imported=${SDL2_IMPORTED} target=${C2D_SDL2_TARGET}")
++        list(APPEND C2D_LDFLAGS ${C2D_SDL2_TARGET})
++    else ()
++        pkg_search_module(SDL2 REQUIRED sdl2)
++        list(APPEND C2D_INCLUDES ${SDL2_INCLUDE_DIRS})
++        list(APPEND C2D_LDFLAGS ${SDL2_LIBRARIES})
++    endif ()
+     if (NOT PLATFORM_VITA)
+         list(APPEND C2D_CFLAGS -D__SDL2__)
+     endif ()
+-    list(APPEND C2D_LDFLAGS ${SDL2_LIBRARIES})
+     file(GLOB SDL2_SRC source/platforms/sdl2/*.c*)
+     list(APPEND C2D_SOURCES ${SDL2_SRC})
+     if (OPTION_SDL2_RGB565)
+@@ -187,7 +230,7 @@ if (OPTION_RENDER_GL2 OR OPTION_RENDER_GLES2 OR OPTION_RENDER_GLES3)
+         if (NOT PLATFORM_PS4)
+             list(APPEND C2D_LDFLAGS GLESv2)
+         endif ()
+-    elseif (NOT PLATFORM_SWITCH)
++    elseif (NOT PLATFORM_SWITCH AND NOT (PLATFORM_PS5 AND PS5_GPU_OPENGL))
+         set(OpenGL_GL_PREFERENCE GLVND)
+         find_package(OpenGL REQUIRED)
+         list(APPEND C2D_INCLUDES ${OPENGL_INCLUDE_DIRS})
+diff --git a/cmake/targets.cmake b/cmake/targets.cmake
+index aa04e73..129cbb2 100644
+--- a/cmake/targets.cmake
++++ b/cmake/targets.cmake
+@@ -20,7 +20,11 @@ add_custom_target(${PROJECT_NAME}.data
+         COMMAND ${CMAKE_COMMAND} -D SRC=${CMAKE_CURRENT_SOURCE_DIR}/data/${TARGET_PLATFORM}/romfs -D DST=${CMAKE_CURRENT_BINARY_DIR}/data_romfs -P ${CMAKE_CURRENT_LIST_DIR}/copy_custom.cmake
+         COMMAND ${CMAKE_COMMAND} -D SRC=${CMAKE_CURRENT_SOURCE_DIR}/data/${TARGET_PLATFORM}/datadir -D DST=${CMAKE_CURRENT_BINARY_DIR}/data_datadir -P ${CMAKE_CURRENT_LIST_DIR}/copy_custom.cmake
+ )
+-add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}.data)
++if (TARGET ${PROJECT_NAME})
++    add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}.data)
++elseif (DEFINED PFBNEO_BUILD_TARGET AND TARGET ${PFBNEO_BUILD_TARGET})
++    add_dependencies(${PFBNEO_BUILD_TARGET} ${PROJECT_NAME}.data)
++endif ()
+ 
+ ########################
+ # Linux/Windows targets
+@@ -160,18 +164,28 @@ if (PLATFORM_PS4)
+ endif (PLATFORM_PS4)
+ 
+ if (PLATFORM_PS5)
+-    set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS_RELEASE -s)
+-    add_custom_target(${PROJECT_NAME}_${TARGET_PLATFORM}_release
++    if (TARGET ${PROJECT_NAME})
++        set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS_RELEASE -s)
++    endif ()
++    set(PS5_RUNTIME_COMMANDS)
++    if (NOT PS5_GPU_OPENGL)
++        list(APPEND PS5_RUNTIME_COMMANDS
++                COMMAND ${CMAKE_COMMAND} -E copy "${PS5_PAYLOAD_SDK}/target/user/homebrew/lib/libOSMesa.so.8" ${CMAKE_BINARY_DIR}/release/${PROJECT_NAME}/)
++    endif ()
++    if (TARGET ${PROJECT_NAME})
++      add_custom_target(${PROJECT_NAME}_${TARGET_PLATFORM}_release
+             DEPENDS ${PROJECT_NAME}
+             COMMAND ${CMAKE_COMMAND} -E remove -f ${CMAKE_BINARY_DIR}/${PROJECT_NAME}-${VERSION_MAJOR}.${VERSION_MINOR}_${TARGET_PLATFORM}.zip
+             COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/release/${PROJECT_NAME}
+             COMMAND ${CMAKE_COMMAND} -E make_directory   ${CMAKE_BINARY_DIR}/release/${PROJECT_NAME}
+             COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}${CMAKE_EXECUTABLE_SUFFIX}" ${CMAKE_BINARY_DIR}/release/${PROJECT_NAME}/
+-            COMMAND ${CMAKE_COMMAND} -E copy "${PS5_PAYLOAD_SDK}/target/user/homebrew/lib/libOSMesa.so.8" ${CMAKE_BINARY_DIR}/release/${PROJECT_NAME}/
++            ${PS5_RUNTIME_COMMANDS}
+             COMMAND ${CMAKE_COMMAND} -D SRC=${CMAKE_CURRENT_BINARY_DIR}/data_datadir -D DST=${CMAKE_BINARY_DIR}/release/${PROJECT_NAME} -P ${CMAKE_CURRENT_LIST_DIR}/copy_custom.cmake
+             COMMAND ${CMAKE_COMMAND} -D SRC=${CMAKE_CURRENT_BINARY_DIR}/data_romfs   -D DST=${CMAKE_BINARY_DIR}/release/${PROJECT_NAME} -P ${CMAKE_CURRENT_LIST_DIR}/copy_custom.cmake
+             COMMAND cd ${CMAKE_BINARY_DIR}/release && ${ZIP} -r ../${PROJECT_NAME}-${VERSION_MAJOR}.${VERSION_MINOR}_${TARGET_PLATFORM}.zip ${PROJECT_NAME}
+-    )
++      )
++    endif ()
++
+ endif (PLATFORM_PS5)
+ 
+ ###########################
+diff --git a/include/cross2d/c2d.h b/include/cross2d/c2d.h
+index d2b77e0..3d424f7 100644
+--- a/include/cross2d/c2d.h
++++ b/include/cross2d/c2d.h
+@@ -25,6 +25,7 @@
+ #include "cross2d/skeleton/thread.h"
+ #include "cross2d/skeleton/mutex.h"
+ #include "cross2d/skeleton/cond.h"
++#include "cross2d/skeleton/ps5_profiler.h"
+ #include "cross2d/skeleton/device.h"
+ #include "cross2d/widgets/button.h"
+ #include "cross2d/widgets/textbox.h"
+diff --git a/include/cross2d/platforms/gl2/gl_shaders.h b/include/cross2d/platforms/gl2/gl_shaders.h
+index a613276..dac840c 100644
+--- a/include/cross2d/platforms/gl2/gl_shaders.h
++++ b/include/cross2d/platforms/gl2/gl_shaders.h
+@@ -31,8 +31,13 @@ namespace c2d {
+         GLuint GetProgram();
+ 
+     private:
++        GLint uniformLocation(const GLchar *name) const;
+         GLuint program = -1;
+-    };
++        GLint mvpMatrix = -1;
++        GLint inputSize = -1;
++        GLint textureSize = -1;
++        GLint outputSize = -1;
++};
+ 
+     class GLShaderList : public ShaderList {
+ 
+diff --git a/source/platforms/gl2/gl_renderer.cpp b/source/platforms/gl2/gl_renderer.cpp
+index 7307db7..aff2095 100644
+--- a/source/platforms/gl2/gl_renderer.cpp
++++ b/source/platforms/gl2/gl_renderer.cpp
+@@ -24,6 +24,21 @@ void GLRenderer::initGL() {
+     printf("GL version  : %s\n", glGetString(GL_VERSION));
+     printf("GL glsl     : %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+ 
++#if defined(__PS5__) && defined(C2D_PS5_MESA_GL)
++    int major = 0, minor = 0;
++    const char *version = (const char *) glGetString(GL_VERSION);
++    const char *glsl = (const char *) glGetString(GL_SHADING_LANGUAGE_VERSION);
++    int glslMajor = 0, glslMinor = 0;
++    if (!version || std::sscanf(version, "%d.%d", &major, &minor) != 2 ||
++        major < 3 || (major == 3 && minor < 3) ||
++        !glsl || std::sscanf(glsl, "%d.%d", &glslMajor, &glslMinor) != 2 ||
++        glslMajor < 3 || (glslMajor == 3 && glslMinor < 30)) {
++        printf("[PS5 GL] ERROR: OpenGL 3.3 Core / GLSL 3.30 required, got GL=%s GLSL=%s\n",
++               version ? version : "<null>", glsl ? glsl : "<null>");
++        return;
++    }
++#endif
++
+ #ifdef glGenVertexArrays
+     // vao
+     GL_CHECK(glGenVertexArrays(1, &vao));
+@@ -33,9 +48,13 @@ void GLRenderer::initGL() {
+ 
+     // init shaders
+     m_shaderList = (ShaderList *) new GLShaderList();
++    available = true;
+ }
+ 
+ void GLRenderer::draw(VertexArray *vertexArray, const Transform &transform, Texture *texture) {
++#if defined(__PS5__)
++    PS5Profiler::Stage profileStage = PS5Profiler::UIDraw;
++#endif
+     Vertex *vertices;
+     size_t vertexCount;
+     GLTexture *tex;
+@@ -55,6 +74,15 @@ void GLRenderer::draw(VertexArray *vertexArray, const Transform &transform, Text
+     if (tex && tex->m_shader && tex->m_shader->available) {
+         shader = (GLShader *) tex->m_shader;
+     }
++#if defined(__PS5__)
++    if (tex) {
++        profileStage = shader->name.compare(0, 4, "crt-") == 0 ? PS5Profiler::CRTDraw : PS5Profiler::VideoDraw;
++        if (tex->m_shader && tex->m_shader->available) {
++            PS5Profiler::setShader(shader->name.c_str());
++        }
++    }
++    PS5Profiler::begin(profileStage);
++#endif
+ 
+     // set shader
+     GL_CHECK(glUseProgram(shader->GetProgram()));
+@@ -150,6 +178,9 @@ void GLRenderer::draw(VertexArray *vertexArray, const Transform &transform, Text
+     vertexArray->unbind();
+ 
+     GL_CHECK(glUseProgram(0));
++#if defined(__PS5__)
++    PS5Profiler::end(profileStage);
++#endif
+ }
+ 
+ void GLRenderer::clear() {
+diff --git a/source/platforms/gl2/gl_shaders.cpp b/source/platforms/gl2/gl_shaders.cpp
+index 1fabfdd..972255f 100644
+--- a/source/platforms/gl2/gl_shaders.cpp
++++ b/source/platforms/gl2/gl_shaders.cpp
+@@ -25,7 +25,8 @@ static c2d::GLShaderDumper *shaderDumper;
+ 
+ using namespace c2d;
+ 
+-static GLuint compile(GLenum type, const char *source, int size = 0) {
++static GLuint compile(GLenum type, const char *source, int size = 0,
++                      const char *shaderName = nullptr, const std::string *version = nullptr) {
+     GLuint handle;
+     GLint compile_result;
+     GLchar msg[512];
+@@ -49,7 +50,10 @@ static GLuint compile(GLenum type, const char *source, int size = 0) {
+     GL_CHECK(glGetShaderiv(handle, GL_COMPILE_STATUS, &compile_result));
+     if (!compile_result) {
+         glGetShaderInfoLog(handle, sizeof(msg), nullptr, msg);
+-        printf("GLShader::compile: %u: %s\n", type, msg);
++        printf("[GLShader] name=%s type=%s glsl=%s log=%s\n",
++               shaderName ? shaderName : "unknown",
++               type == GL_VERTEX_SHADER ? "vertex" : "fragment",
++               version ? version->c_str() : "binary", msg);
+         glDeleteShader(handle);
+         return 0;
+     }
+@@ -73,12 +77,12 @@ GLShader::GLShader(const std::string &n, const char *vertex, const char *fragmen
+         //printf("GLShader::GLShader: %s, version: %s\n", name.c_str(), version.c_str());
+         v = std::string("#version " + version + "\n") + vertex;
+         f = std::string("#version " + version + "\n") + fragment;
+-        vsh = compile(GL_VERTEX_SHADER, v.c_str(), vertexSize);
++        vsh = compile(GL_VERTEX_SHADER, v.c_str(), vertexSize, n.c_str(), &version);
+         if (!vsh) {
+             printf("GLShader: vsh compilation failed\n");
+             return;
+         }
+-        fsh = compile(GL_FRAGMENT_SHADER, f.c_str(), fragmentSize);
++        fsh = compile(GL_FRAGMENT_SHADER, f.c_str(), fragmentSize, n.c_str(), &version);
+         if (!fsh) {
+             glDeleteShader(vsh);
+             printf("GLShader: fsh compilation failed\n");
+@@ -103,6 +107,11 @@ GLShader::GLShader(const std::string &n, const char *vertex, const char *fragmen
+         return;
+     }
+ 
++    mvpMatrix = glGetUniformLocation(program, "MVPMatrix");
++    inputSize = glGetUniformLocation(program, "InputSize");
++    textureSize = glGetUniformLocation(program, "TextureSize");
++    outputSize = glGetUniformLocation(program, "OutputSize");
++
+ #if defined(__PS4__) && defined(GL_DUMP_SHADERS)
+         shaderDumper->dump((int) vsh, name, "v");
+         shaderDumper->dump((int) fsh, name, "f");
+@@ -129,13 +138,13 @@ GLShader::GLShader(const std::string &n, const char *source, int size,
+     if (size <= 0) {
+         vertex = std::string("#version " + version + "\n#define VERTEX\n") + source;
+         fragment = std::string("#version " + version + "\n#define FRAGMENT\n") + source;
+-        vsh = compile(GL_VERTEX_SHADER, vertex.c_str(), 0);
++        vsh = compile(GL_VERTEX_SHADER, vertex.c_str(), 0, name.c_str(), &version);
+         if (!vsh) {
+             printf("GLShader::GLShader: %s (version: %s): vsh compilation failed: %i (glGetError: %i)\n",
+                    name.c_str(), version.c_str(), vsh, glGetError());
+             return;
+         }
+-        fsh = compile(GL_FRAGMENT_SHADER, fragment.c_str(), 0);
++        fsh = compile(GL_FRAGMENT_SHADER, fragment.c_str(), 0, name.c_str(), &version);
+         if (!fsh) {
+             glDeleteShader(vsh);
+             printf("GLShader::GLShader: %s (version: %s): fsh compilation failed: %i (glGetError: %i)\n",
+@@ -171,42 +180,51 @@ GLShader::GLShader(const std::string &n, const char *source, int size,
+         return;
+     }
+ 
++    mvpMatrix = glGetUniformLocation(program, "MVPMatrix");
++    inputSize = glGetUniformLocation(program, "InputSize");
++    textureSize = glGetUniformLocation(program, "TextureSize");
++    outputSize = glGetUniformLocation(program, "OutputSize");
++
+     //printf("GLShader::GLShader: %s (version: %s): success\n", name.c_str(), version.c_str());
+     available = true;
+ }
+ 
+ void GLShader::SetUniformMatrix(const GLchar *n, const GLfloat *v) {
+-    GLint loc;
+-    GL_CHECK(loc = glGetUniformLocation(program, n));
++    GLint loc = uniformLocation(n);
+     if (loc > -1) {
+         GL_CHECK(glUniformMatrix4fv(loc, 1, GL_FALSE, v));
+     }
+ }
+ 
+ void GLShader::SetUniform(const GLchar *n, const Vector2f &v) {
+-    GLint loc;
+-    GL_CHECK(loc = glGetUniformLocation(program, n));
++    GLint loc = uniformLocation(n);
+     if (loc > -1) {
+         GL_CHECK(glUniform2f(loc, v.x, v.y));
+     }
+ }
+ 
+ void GLShader::SetUniform(const GLchar *n, const float v0, const float v1) {
+-    GLint loc;
+-    GL_CHECK(loc = glGetUniformLocation(program, n));
++    GLint loc = uniformLocation(n);
+     if (loc > -1) {
+         GL_CHECK(glUniform2f(loc, v0, v1));
+     }
+ }
+ 
+ void GLShader::SetUniform(const GLchar *n, int v) {
+-    GLint loc;
+-    GL_CHECK(loc = glGetUniformLocation(program, n));
++    GLint loc = uniformLocation(n);
+     if (loc > -1) {
+         GL_CHECK(glUniform1i(loc, v));
+     }
+ }
+ 
++GLint GLShader::uniformLocation(const GLchar *n) const {
++    if (strcmp(n, "MVPMatrix") == 0) return mvpMatrix;
++    if (strcmp(n, "InputSize") == 0) return inputSize;
++    if (strcmp(n, "TextureSize") == 0) return textureSize;
++    if (strcmp(n, "OutputSize") == 0) return outputSize;
++    return glGetUniformLocation(program, n);
++}
++
+ GLuint GLShader::GetProgram() {
+     return program;
+ }
+diff --git a/source/platforms/gl2/gl_texture.cpp b/source/platforms/gl2/gl_texture.cpp
+index 34aba06..64c5105 100644
+--- a/source/platforms/gl2/gl_texture.cpp
++++ b/source/platforms/gl2/gl_texture.cpp
+@@ -135,6 +135,9 @@ int GLTexture::resize(const Vector2i &size, bool keepPixels) {
+ }
+ 
+ void GLTexture::unlock(const uint8_t *pixels) {
++#if defined(__PS5__)
++    PS5Profiler::begin(PS5Profiler::Upload);
++#endif
+     const uint8_t *data = (pixels ? pixels : m_pixels) + m_unlock_rect.top * m_pitch + m_unlock_rect.left * m_bpp;
+ 
+     //printf("GLTexture::unlock(%p): rect: {%i, %i, %i, %i}, pixels: %p\n",
+@@ -163,6 +166,9 @@ void GLTexture::unlock(const uint8_t *pixels) {
+ #if !defined(GL_UNPACK_ROW_LENGTH)
+     m_unlock_rect = rect;
+ #endif
++#if defined(__PS5__)
++    PS5Profiler::end(PS5Profiler::Upload);
++#endif
+ }
+ 
+ void GLTexture::setFilter(Filter f) {
+diff --git a/source/platforms/sdl2/sdl2_renderer.cpp b/source/platforms/sdl2/sdl2_renderer.cpp
+index aad7887..04e69a7 100644
+--- a/source/platforms/sdl2/sdl2_renderer.cpp
++++ b/source/platforms/sdl2/sdl2_renderer.cpp
+@@ -26,12 +26,19 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
+     }
+ 
+     Vector2i size = {(int) Renderer::getSize().x, (int) Renderer::getSize().y};
++#if defined(__PS5__) && defined(C2D_PS5_MESA_GL)
++    // Native PS5 GPU titles use a fixed 1080p drawable.  The SDL desktop
++    // fullscreen path can select a different physical surface on the bridge.
++    size = {1920, 1080};
++#endif
+     Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN;
+ #ifndef ANDROID
++#if !(defined(__PS5__) && defined(C2D_PS5_MESA_GL))
+     if (size.x <= 0 || size.y <= 0) {
+         // force fullscreen if window size == 0
+         flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+     }
++#endif
+ #else
+     flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+ #endif
+@@ -46,7 +53,10 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
+     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+ #else
+     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+-#ifdef __GL2__
++#if defined(__PS5__) && defined(C2D_PS5_MESA_GL)
++    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
++    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
++#elif defined(__GL2__)
+     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+ #elif __GL1__
+@@ -92,6 +102,15 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
+         return;
+     }
+ 
++#if defined(__PS5__) && defined(C2D_PS5_MESA_GL)
++    int profile = 0;
++    SDL_GL_GetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, &profile);
++    if (profile != SDL_GL_CONTEXT_PROFILE_CORE) {
++        printf("[PS5 GL] ERROR: Core profile required, got profile=0x%x\n", profile);
++        return;
++    }
++#endif
++
+     SDL_GL_SetSwapInterval(1);
+ 
+ #if __GLAD__
+@@ -107,13 +126,44 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
+ #endif
+ 
+     initGL();
++    if (!available) {
++        printf("[PS5 GL] renderer initialization failed\n");
++        return;
++    }
+ 
+     // we need to delete gl context after all resources are freed by C2DObject destructor
+     std::atexit(exitCallback);
+ 
+-    available = true;
+-
+     auto display = C2DDevice::getDisplaySize();
++    PS5Profiler::setDisplaySize(display.x, display.y);
++#if defined(__PS5__)
++    int drawableW = 0, drawableH = 0;
++    SDL_GL_GetDrawableSize(window, &drawableW, &drawableH);
++#if defined(C2D_PS5_MESA_GL)
++    if (drawableW != 1920 || drawableH != 1080) {
++        printf("[PS5 GL] ERROR: fixed drawable required, got %dx%d (expected 1920x1080)\n",
++               drawableW, drawableH);
++        available = false;
++        return;
++    }
++#endif
++    printf("[PS5 GL] SDL video backend=%s vendor=%s renderer=%s version=%s GLSL_VERSION=%s drawable=%dx%d swap_interval=1\n",
++           SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "unknown",
++           glGetString(GL_VENDOR), glGetString(GL_RENDERER), glGetString(GL_VERSION),
++           glGetString(GL_SHADING_LANGUAGE_VERSION), drawableW, drawableH);
++    const char *vendor = (const char *) glGetString(GL_VENDOR);
++    const char *renderer = (const char *) glGetString(GL_RENDERER);
++    const bool mesaRenderer = vendor && renderer &&
++                              !strstr(vendor, "OSMesa") && !strstr(renderer, "OSMesa") &&
++                              (strstr(vendor, "Mesa") || strstr(renderer, "Mesa") ||
++                               strstr(renderer, "Gallium") || strstr(renderer, "PS5"));
++    printf("[PS5 GPU] backend=ps5-opengl SDL=%s GL_VENDOR=%s GL_RENDERER=%s GL_VERSION=%s GLSL_VERSION=%s drawable=%dx%d swap_interval=1 renderer_path=%s\n",
++           SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "unknown",
++           vendor ? vendor : "unknown", renderer ? renderer : "unknown",
++           glGetString(GL_VERSION), glGetString(GL_SHADING_LANGUAGE_VERSION),
++           drawableW, drawableH, mesaRenderer ? "hardware" : "unknown");
++    if (!mesaRenderer) printf("[PS5 GPU] WARNING: target Mesa/Gallium renderer was not detected\n");
++#endif
+     printf("SDL2Renderer(%p): platform: %s, resolution: %i x %i, display: %i x %i\n",
+            this, C2DDevice::getName().c_str(),
+            (int) m_size.x, (int) m_size.y, display.x, display.y);
+@@ -122,20 +172,33 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
+ void SDL2Renderer::setFullscreen(const bool value) {
+     if (!value) return;
+ 
++#if defined(__PS5__) && defined(C2D_PS5_MESA_GL)
++    // Native PS5 GPU mode has one fixed-size window and no runtime resize.
++    printf("[PS5 GL] fullscreen toggle ignored in fixed 1920x1080 mode\n");
++    return;
++#else
+     SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+ 
+     // update render size
+     int w, h = 0;
+     SDL_GetWindowSize(window, &w, &h);
+     SDL2Renderer::setSize((float) w, (float) h);
++#endif
+ }
+ 
+ void SDL2Renderer::flip(bool draw, bool inputs) {
++#if defined(__PS5__)
++    PS5Profiler::begin(PS5Profiler::Present);
++#endif
+     // call base class (draw childs)
+     GLRenderer::flip(draw, inputs);
+ 
+     // flip
+     SDL_GL_SwapWindow(window);
++#if defined(__PS5__)
++    PS5Profiler::end(PS5Profiler::Present);
++    PS5Profiler::endFrame();
++#endif
+ }
+ 
+ void SDL2Renderer::delay(unsigned int ms) {
+diff --git a/include/cross2d/skeleton/ps5_profiler.h b/include/cross2d/skeleton/ps5_profiler.h
+new file mode 100644
+index 0000000..fb78f99
+--- /dev/null
++++ b/include/cross2d/skeleton/ps5_profiler.h
+@@ -0,0 +1,22 @@
++#ifndef C2D_PS5_PROFILER_H
++#define C2D_PS5_PROFILER_H
++
++#include <string>
++
++namespace c2d {
++namespace PS5Profiler {
++
++enum Stage { Core, Upload, VideoDraw, CRTDraw, UIDraw, Present, Frame };
++
++void beginFrame();
++void begin(Stage stage);
++void end(Stage stage);
++void endFrame();
++void setGameInfo(int width, int height, int pitch, const char *format);
++void setShader(const char *name);
++void setDisplaySize(int width, int height);
++
++} // namespace PS5Profiler
++} // namespace c2d
++
++#endif
+diff --git a/source/skeleton/ps5_profiler.cpp b/source/skeleton/ps5_profiler.cpp
+new file mode 100644
+index 0000000..1a60b2d
+--- /dev/null
++++ b/source/skeleton/ps5_profiler.cpp
+@@ -0,0 +1,71 @@
++#include "cross2d/skeleton/ps5_profiler.h"
++
++#if defined(__PS5__)
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++
++namespace {
++using Clock = std::chrono::steady_clock;
++double now() { return std::chrono::duration<double, std::milli>(Clock::now().time_since_epoch()).count(); }
++double totals[7] = {};
++double started[7] = {};
++double current[7] = {};
++double minimum[7] = {};
++double maximum[7] = {};
++unsigned long frames = 0;
++unsigned int windowFrames = 0;
++int gameW = 0, gameH = 0, pitch = 0, displayW = 0, displayH = 0;
++const char *format = "unknown";
++const char *shader = "none";
++const char *mode() {
++    const char *value = std::getenv("PEMU_CRT_MODE");
++    if (!value || !*value) return "CRT_CURRENT";
++    if (!std::strcmp(value, "CRT_OFF") || !std::strcmp(value, "CRT_TEST_FAST") ||
++        !std::strcmp(value, "CRT_CURRENT")) return value;
++    return "CRT_CURRENT";
++}
++}
++
++namespace c2d { namespace PS5Profiler {
++void beginFrame() {
++    ++frames;
++    ++windowFrames;
++    std::memset(current, 0, sizeof(current));
++    begin(Frame);
++}
++void begin(Stage stage) { started[stage] = now(); }
++void end(Stage stage) { if (started[stage] > 0) { current[stage] += now() - started[stage]; started[stage] = 0; } }
++void setGameInfo(int w, int h, int p, const char *f) { gameW=w; gameH=h; pitch=p; format=f; }
++void setShader(const char *s) { shader = s ? s : "none"; }
++void setDisplaySize(int w, int h) { displayW=w; displayH=h; }
++void endFrame() {
++    end(Frame);
++    for (int i = 0; i < 7; ++i) {
++        totals[i] += current[i];
++        if (windowFrames == 1 || current[i] < minimum[i]) minimum[i] = current[i];
++        if (current[i] > maximum[i]) maximum[i] = current[i];
++    }
++    if (windowFrames < 120) return;
++    const double frameAvg = totals[Frame] / windowFrames;
++    std::printf("[PS5 PERF %uf] fps=%.2f core=%.3fms upload=%.3fms video=%.3fms ui=%.3fms present=%.3fms frame=%.3fms frame_min=%.3fms frame_max=%.3fms shader=%s src=%dx%d pitch=%d display=%dx%d\n",
++        windowFrames, frameAvg > 0 ? 1000.0 / frameAvg : 0.0, totals[Core]/windowFrames,
++        totals[Upload]/windowFrames, totals[VideoDraw]/windowFrames, totals[UIDraw]/windowFrames,
++        totals[Present]/windowFrames, frameAvg, minimum[Frame], maximum[Frame], shader,
++        gameW, gameH, pitch, displayW, displayH);
++    std::printf("[PS5 PERF %uf] crt=%s crt_avg=%.3fms crt_min=%.3fms crt_max=%.3fms\n",
++        windowFrames, std::strcmp(shader, "c2d-texture") == 0 ? "off" : shader,
++        totals[CRTDraw]/windowFrames, minimum[CRTDraw], maximum[CRTDraw]);
++    std::printf("PS5_VIDEO framebuffer=%dx%d pitch=%d format=%s display=%dx%d shader=%s mode=%s\n",
++        gameW, gameH, pitch, format, displayW, displayH, shader, mode());
++    std::memset(totals, 0, sizeof(totals));
++    windowFrames = 0;
++}
++} }
++#else
++namespace c2d { namespace PS5Profiler {
++void beginFrame() {} void begin(Stage) {} void end(Stage) {} void endFrame() {}
++void setGameInfo(int,int,int,const char*) {} void setShader(const char*) {} void setDisplaySize(int,int) {}
++} }
++#endif
+
