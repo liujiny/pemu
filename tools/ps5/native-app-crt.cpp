@@ -146,7 +146,7 @@ extern "C" void _fini()
 extern "C" [[noreturn]] __attribute__((visibility("default"))) void
 _start(void *process_parameters, Destructor loader_teardown)
 {
-    BOOT_STAGE("build state-audio-r20-20261002");
+    BOOT_STAGE("build cv-thread-r21-20261002");
     BOOT_STAGE("_start entered");
     const int argc = *static_cast<const int *>(process_parameters);
     auto *parameters = static_cast<std::uint8_t *>(process_parameters);

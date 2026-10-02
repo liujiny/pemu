@@ -111,22 +111,23 @@ int main(){
 subprocess.run(['clang++-18','-std=c++17','-fsanitize=address,undefined',str(out/'consumer-test.cpp'),'-o',str(out/'consumer-test')],check=True)
 subprocess.run([str(out/'consumer-test')],check=True)
 code=r"""
-#define clock_gettime fake_clock_gettime
 #include <assert.h>
-#include <string.h>
+#include <errno.h>
+#include <stdint.h>
+#include <time.h>
+#include <stdio.h>
 """+'\n#include "'+str(root/'tools/ps5/native-input-probe.c')+'"\n'+r"""
-void pemu_native_heap_mark(void) {}
-static uint64_t fake_us=1;static int lines,clocks;
-int fake_clock_gettime(clockid_t c,struct timespec *t){++clocks;t->tv_sec=fake_us/1000000;t->tv_nsec=(fake_us%1000000)*1000;errno=99;return 0;}
-void pemu_boot_mark(const char *s){assert(strstr(s,"INPUT_PERF") || strstr(s,"RENDER_PERF"));++lines;errno=88;}
+static int lines,clocks;
+int clock_gettime(clockid_t c,struct timespec *t){++clocks;return -1;}
+void pemu_boot_mark(const char *s){++lines;}
+void pemu_native_heap_mark(void){++lines;}
 int main(){
- errno=27;pemu_native_input_probe(2);fake_us+=9000000;pemu_native_input_probe(3);assert(window_start==0 && stages[1].count==0);pemu_native_input_probe(0);fake_us+=100;pemu_native_input_probe(2);fake_us+=50;pemu_native_input_probe(3);fake_us+=50;pemu_native_input_probe(1);
- assert(errno==27&&stages[0].total==200&&stages[1].total==50);
- pemu_native_input_probe(12);fake_us+=20;pemu_native_input_probe(14);fake_us+=100;pemu_native_input_probe(15);fake_us+=20;pemu_native_input_probe(13);
- assert(stages[6].total==140 && stages[7].total==100 && stages[7].count==1);
- for(int i=0;i<20;i++){pemu_native_input_probe(0);fake_us+=5000001;pemu_native_input_probe(1);assert(errno==27);}
- assert(lines==48&&reports==12);int n=clocks;pemu_native_input_probe(0);pemu_native_input_probe(1);assert(clocks==n);
- puts("PASS actual probe: timing totals, errno preservation, 12-report bound, no clocks after bound");
+ errno=27;
+ for(unsigned i=0;i<100000;i++) {
+  pemu_native_input_probe(i%20); pemu_native_game_input(i);
+ }
+ assert(errno==27 && lines==0 && clocks==0);
+ puts("PASS normal-build probe hooks: no logs, clocks or errno changes");
 }
 """
 (out/'probe-test.c').write_text(code)

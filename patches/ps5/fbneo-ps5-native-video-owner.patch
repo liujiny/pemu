@@ -18,10 +18,22 @@ index feae3a9f7..498dc16ec 100644
  #define OOB_CHECKER         1
  #define OOB_CHECK			0x200 // default oob detection range (512bytes)
 diff --git a/src/burn/devices/epic12.cpp b/src/burn/devices/epic12.cpp
-index b018515e9..7bdfdbe52 100644
+index b018515e9..5abfa6046 100644
 --- a/src/burn/devices/epic12.cpp
 +++ b/src/burn/devices/epic12.cpp
-@@ -287,6 +287,9 @@ typedef const void (*epic12_device_blitfunction)(
+@@ -9,7 +9,11 @@ Redistributions may not be sold, nor may they be used in a commercial product or
+ #include "burnint.h"
+ #include "tiles_generic.h"
+ #include "sh4_intf.h"
++#if defined(__PS5__)
++#include "epic12_ps5_thread.h"
++#else
+ #include "thready.h"
++#endif
+ #include "rectangle.h"
+ #include <math.h> // floor()
+ 
+@@ -287,6 +291,9 @@ typedef const void (*epic12_device_blitfunction)(
  #include "epic12_blit6.inc"
  #include "epic12_blit7.inc"
  #include "epic12_blit8.inc"
@@ -31,7 +43,29 @@ index b018515e9..7bdfdbe52 100644
  
  static UINT8 *dips; // pointer to cv1k's dips
  
-@@ -409,6 +412,10 @@ void epic12_reset()
+@@ -375,6 +382,11 @@ void epic12_set_blitterdelay_method(INT32 delay_method) // 0 = accurate, !0 = an
+ 
+ void epic12_set_blitter_clipping_margin(INT32 c_margin_on) // ??? not sure.
+ {
++#if defined(__PS5__)
++    // Even writing the same value races with a worker reading the margin.
++    if (EP1C_CLIP_MARGIN == (c_margin_on ? 32 : 0)) return;
++    thready.notify_wait();
++#endif
+ 	EP1C_CLIP_MARGIN = (c_margin_on) ? 32 : 0;
+ }
+ 
+@@ -385,6 +397,9 @@ void epic12_set_blitter_sleep_on_busy(INT32 busysleep_on)
+ 
+ void epic12_reset()
+ {
++#if defined(__PS5__)
++	thready.notify_wait();
++#endif
+ 	// cache table to avoid divides in blit code, also pre-clamped
+ 	int x,y;
+ 	for (y=0;y<0x40;y++)
+@@ -409,6 +424,10 @@ void epic12_reset()
  		}
  	}
  
@@ -42,7 +76,7 @@ index b018515e9..7bdfdbe52 100644
  	m_blitter_busy = 0;
  	m_gfx_addr = 0;
  	m_gfx_addr_shadowcopy = 0;
-@@ -793,6 +800,13 @@ static void gfx_draw(UINT32 *addr)
+@@ -793,6 +812,13 @@ static void gfx_draw(UINT32 *addr)
  	if ((s_mode==0 && s_alpha==0x1f) && (d_mode==4 && d_alpha==0x1f))
  		blend = 0;
  
@@ -56,6 +90,26 @@ index b018515e9..7bdfdbe52 100644
  	if (tinted)
  	{
  		if (!flipx)
+@@ -1135,6 +1161,9 @@ static void epic12_draw_screen16_24bpp()
+ 
+ void epic12_draw_screen(UINT8 &recalc_palette)
+ {
++#if defined(__PS5__)
++	thready.notify_wait();
++#endif
+ 	INT32 scrollx = -m_gfx_scroll_x;
+ 	INT32 scrolly = -m_gfx_scroll_y;
+ 
+@@ -1253,6 +1282,9 @@ void epic12_blitter_write(UINT32 offset, UINT32 data)
+ 
+ void epic12_scan(INT32 nAction, INT32 *pnMin)
+ {
++#if defined(__PS5__)
++	thready.notify_wait();
++#endif
+ 	SCAN_VAR(m_gfx_addr);
+ //	SCAN_VAR(m_gfx_addr_shadowcopy); // probably not needed!
+ 	SCAN_VAR(m_gfx_scroll_x);
 diff --git a/src/burn/devices/epic12_fast_blit.h b/src/burn/devices/epic12_fast_blit.h
 new file mode 100644
 index 000000000..1112921e4
@@ -139,76 +193,117 @@ index 000000000..1112921e4
 +#undef EPIC12_FIXED_CALL
 +}
 +#endif
+diff --git a/src/burn/devices/epic12_ps5_thread.h b/src/burn/devices/epic12_ps5_thread.h
+new file mode 100644
+index 000000000..bcd1a679c
+--- /dev/null
++++ b/src/burn/devices/epic12_ps5_thread.h
+@@ -0,0 +1,88 @@
++// PS5 CV1000-only worker. One ordered command list; no guest state on worker.
++#ifndef EPIC12_PS5_THREAD_H
++#define EPIC12_PS5_THREAD_H
++#include <SDL_thread.h>
++#include <SDL_mutex.h>
++extern "C" void pemu_boot_mark(const char *) __attribute__((weak));
++struct Epic12Ps5Thread {
++    SDL_mutex *mutex = nullptr;
++    SDL_cond *condition = nullptr;
++    SDL_Thread *thread = nullptr;
++    void (*callback)() = nullptr;
++    bool pending = false, running = false, stopping = false;
++    // Main-thread-only control. Not part of the guest state file format.
++    bool enabled = true;
++    unsigned warmup = 0;
++    static int worker(void *opaque) {
++        Epic12Ps5Thread *self = static_cast<Epic12Ps5Thread *>(opaque);
++        SDL_LockMutex(self->mutex);
++        for (;;) {
++            while (!self->pending && !self->stopping)
++                SDL_CondWait(self->condition, self->mutex);
++            if (self->stopping) break;
++            self->pending = false;
++            self->running = true;
++            SDL_UnlockMutex(self->mutex);
++            self->callback();
++            SDL_LockMutex(self->mutex);
++            self->running = false;
++            SDL_CondBroadcast(self->condition);
++        }
++        SDL_UnlockMutex(self->mutex);
++        return 0;
++    }
++    void init(void (*cb)()) {
++        exit();
++        callback = cb; enabled = true; warmup = 0;
++        pending = running = stopping = false;
++        mutex = SDL_CreateMutex();
++        if (mutex) condition = SDL_CreateCond();
++        // All shared state and synchronization exist before starting worker.
++        if (condition) thread = SDL_CreateThread(worker, "cv1000-blitter", this);
++        if (!thread) {
++            if (condition) SDL_DestroyCond(condition);
++            if (mutex) SDL_DestroyMutex(mutex);
++            condition = nullptr; mutex = nullptr;
++            if (pemu_boot_mark) pemu_boot_mark("CV blitter worker unavailable; synchronous fallback");
++        }
++    }
++    void notify_wait() {
++        if (!thread) return;
++        SDL_LockMutex(mutex);
++        while (pending || running) SDL_CondWait(condition, mutex);
++        SDL_UnlockMutex(mutex);
++    }
++    void notify() {
++        notify_wait();
++        // Match upstream startup grace period, without changing r20 save layout.
++        if (!thread || !enabled || warmup < 180) {
++            if (warmup < 180) ++warmup;
++            if (callback) callback();
++            return;
++        }
++        SDL_LockMutex(mutex);
++        pending = true;
++        SDL_CondSignal(condition);
++        SDL_UnlockMutex(mutex);
++    }
++    void set_threading(int value) {
++        if (!value) notify_wait();
++        enabled = value != 0;
++    }
++    void reset() { notify_wait(); warmup = 0; }
++    void scan() { notify_wait(); }
++    void exit() {
++        if (!thread) return;
++        notify_wait();
++        SDL_LockMutex(mutex);
++        stopping = true;
++        SDL_CondSignal(condition);
++        SDL_UnlockMutex(mutex);
++        SDL_WaitThread(thread, nullptr);
++        thread = nullptr;
++        SDL_DestroyCond(condition); condition = nullptr;
++        SDL_DestroyMutex(mutex); mutex = nullptr;
++    }
++};
++static Epic12Ps5Thread thready;
++#endif
 diff --git a/src/burn/drv/cave/cv1k_ps5_profile.h b/src/burn/drv/cave/cv1k_ps5_profile.h
 new file mode 100644
-index 000000000..6c6856e5e
+index 000000000..b32368fa4
 --- /dev/null
 +++ b/src/burn/drv/cave/cv1k_ps5_profile.h
-@@ -0,0 +1,62 @@
-+// Bounded phase measurements; CPU phase includes memory/device handlers.
+@@ -0,0 +1,9 @@
++// Normal build: no per-frame clocks or performance log writes.
 +#ifndef CV1K_PS5_PROFILE_H
 +#define CV1K_PS5_PROFILE_H
-+#if defined(__PS5__)
-+#include <time.h>
-+#include <stdio.h>
-+#include <errno.h>
-+extern "C" void pemu_boot_mark(const char *) __attribute__((weak));
-+static UINT64 cvp_start, cvp_last, cvp_total[4];
-+static unsigned cvp_frames, cvp_reports;
-+static UINT64 cvp_now() {
-+    const int saved = errno;
-+    struct timespec t;
-+    const int rc = clock_gettime(CLOCK_MONOTONIC, &t);
-+    errno = saved;
-+    return rc ? 0 : (UINT64)t.tv_sec * 1000000 + t.tv_nsec / 1000;
-+}
-+static void cvp_reset() {
-+    cvp_start = cvp_last = 0; cvp_frames = cvp_reports = 0;
-+    memset(cvp_total, 0, sizeof(cvp_total));
-+}
-+static void cvp_load(const char *stage, UINT64 start) {
-+    if (!pemu_boot_mark) return;
-+    const int saved = errno;
-+    char line[180];
-+    snprintf(line, sizeof(line), "CV_LOAD game=%s stage=%s us=%llu",
-+        BurnDrvGetTextA(DRV_NAME), stage, (unsigned long long)(cvp_now() - start));
-+    pemu_boot_mark(line); errno = saved;
-+}
-+static void cvp_begin() {
-+    if (cvp_reports >= 12) return;
-+    cvp_last = cvp_now(); if (!cvp_start) cvp_start = cvp_last;
-+}
-+static void cvp_phase(unsigned phase) {
-+    if (cvp_reports >= 12) return;
-+    UINT64 now = cvp_now();
-+    if (now >= cvp_last) cvp_total[phase] += now - cvp_last;
-+    cvp_last = now;
-+    if (phase != 3) return;
-+    ++cvp_frames;
-+    if (now - cvp_start < 5000000) return;
-+    const int saved = errno;
-+    char line[192];
-+    snprintf(line, sizeof(line),
-+        "CV_PERF game=%s frames=%u cpu_us=%llu audio_us=%llu sync_us=%llu draw_us=%llu clock=%d dips=%02x",
-+        BurnDrvGetTextA(DRV_NAME), cvp_frames,
-+        (unsigned long long)(cvp_total[0]/cvp_frames), (unsigned long long)(cvp_total[1]/cvp_frames),
-+        (unsigned long long)(cvp_total[2]/cvp_frames), (unsigned long long)(cvp_total[3]/cvp_frames),
-+        DriverClock, DrvDips[1]);
-+    if (pemu_boot_mark) pemu_boot_mark(line);
-+    errno = saved;
-+    ++cvp_reports; cvp_frames = 0; cvp_start = now;
-+    memset(cvp_total, 0, sizeof(cvp_total));
-+}
-+#else
-+static UINT64 cvp_now() { return 0; }
-+static void cvp_reset() {}
-+static void cvp_load(const char *, UINT64) {}
-+static void cvp_begin() {}
-+static void cvp_phase(unsigned) {}
-+#endif
++static inline UINT64 cvp_now() { return 0; }
++static inline void cvp_reset() {}
++static inline void cvp_load(const char *, UINT64) {}
++static inline void cvp_begin() {}
++static inline void cvp_phase(unsigned) {}
 +#endif
 diff --git a/src/burn/drv/cave/d_cv1k.cpp b/src/burn/drv/cave/d_cv1k.cpp
-index c009baea5..e2e9fffcb 100644
+index c009baea5..48298b4c5 100644
 --- a/src/burn/drv/cave/d_cv1k.cpp
 +++ b/src/burn/drv/cave/d_cv1k.cpp
 @@ -43,6 +43,8 @@ static INT32 DriverClock; // selected cpu clockrate
@@ -220,7 +315,17 @@ index c009baea5..e2e9fffcb 100644
  
  static struct BurnInputInfo Cv1kInputList[] = {
  	{"P1 Coin",			BIT_DIGITAL,	DrvJoy1 + 2,	"p1 coin"	},
-@@ -480,10 +482,16 @@ static INT32 DrvInit()
+@@ -361,6 +363,9 @@ static void speedhack_set(UINT32 ram, UINT32 pc)
+ 
+ static INT32 DrvDoReset()
+ {
++#if defined(__PS5__)
++	epic12_wait_blitterthread();
++#endif
+ 	memset (AllRam, 0, RamEnd - AllRam);
+ 
+ 	Sh3Open(0);
+@@ -480,10 +485,16 @@ static INT32 DrvInit()
  	BurnDrvGetRomInfo(&ri, 0);
  	if (ri.nLen >= 0x400000) is_type_d = 1;
  
@@ -238,7 +343,7 @@ index c009baea5..e2e9fffcb 100644
  
  	Sh3Init(0, SH3_CLOCK, 0, 0, 0, 0, 0, 1, 0, 1, 0);
  	Sh3Open(0);
-@@ -520,6 +528,8 @@ static INT32 DrvInit()
+@@ -520,11 +531,16 @@ static INT32 DrvInit()
  	ymz770_set_buffered(Sh3TotalCycles, SH3_CLOCK);
  	DrvDoReset();
  
@@ -247,7 +352,15 @@ index c009baea5..e2e9fffcb 100644
  	return 0;
  }
  
-@@ -607,6 +617,7 @@ static INT32 DrvFrame()
+ static INT32 DrvExit()
+ {
++#if defined(__PS5__)
++	epic12_wait_blitterthread();
++#endif
+ 	Sh3Exit();
+ 
+ 	epic12_exit();
+@@ -607,6 +623,7 @@ static INT32 DrvFrame()
  	INT32 nCyclesTotal[1] = { DriverClock / 60 };
  	INT32 nCyclesDone[1] = { nExtraCycles[0] };
  
@@ -255,7 +368,7 @@ index c009baea5..e2e9fffcb 100644
  	Sh3Open(0);
  
  	for (INT32 i = 0; i < nInterleave; i++)
-@@ -616,10 +627,12 @@ static INT32 DrvFrame()
+@@ -616,10 +633,12 @@ static INT32 DrvFrame()
  
  	Sh3SetIRQLine(2, CPU_IRQSTATUS_HOLD);
  
@@ -268,7 +381,7 @@ index c009baea5..e2e9fffcb 100644
  	nExtraCycles[0] = nCyclesDone[0] - nCyclesTotal[0];
  
  	Sh3Close();
-@@ -630,10 +643,13 @@ static INT32 DrvFrame()
+@@ -630,15 +649,21 @@ static INT32 DrvFrame()
  		epic12_wait_blitterthread();
  	}
  
@@ -282,6 +395,14 @@ index c009baea5..e2e9fffcb 100644
  	return 0;
  }
  
+ static INT32 DrvScan(INT32 nAction, INT32 *pnMin)
+ {
++#if defined(__PS5__)
++	epic12_wait_blitterthread();
++#endif
+ 	if (pnMin) {
+ 		*pnMin = 0x029704;
+ 	}
 diff --git a/src/burner/state.cpp b/src/burner/state.cpp
 index fd03054a6..48212336c 100644
 --- a/src/burner/state.cpp
