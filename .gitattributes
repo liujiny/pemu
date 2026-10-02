@@ -1,0 +1,2 @@
+# Unified diffs contain intentional context prefixes and original CRLF bytes.
+*.patch -whitespace -text

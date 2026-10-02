@@ -1,4 +1,512 @@
+diff --git a/src/burn/burn_memory.cpp b/src/burn/burn_memory.cpp
+index feae3a9f7..498dc16ec 100644
+--- a/src/burn/burn_memory.cpp
++++ b/src/burn/burn_memory.cpp
+@@ -6,6 +6,14 @@
+ 
+ #include "burnint.h"
+ 
++#if defined(__PS5__)
++extern "C" void *pemu_native_core_malloc(size_t) __attribute__((weak));
++static void *pemu_core_malloc(size_t size) {
++    return pemu_native_core_malloc ? pemu_native_core_malloc(size) : malloc(size);
++}
++#define malloc pemu_core_malloc
++#endif
++
+ #define LOG_MEMORY_USAGE    0
+ #define OOB_CHECKER         1
+ #define OOB_CHECK			0x200 // default oob detection range (512bytes)
+diff --git a/src/burn/devices/epic12.cpp b/src/burn/devices/epic12.cpp
+index b018515e9..7bdfdbe52 100644
+--- a/src/burn/devices/epic12.cpp
++++ b/src/burn/devices/epic12.cpp
+@@ -287,6 +287,9 @@ typedef const void (*epic12_device_blitfunction)(
+ #include "epic12_blit6.inc"
+ #include "epic12_blit7.inc"
+ #include "epic12_blit8.inc"
++#if defined(__PS5__) || defined(EPIC12_BLIT_TEST)
++#include "epic12_fast_blit.h"
++#endif
+ 
+ static UINT8 *dips; // pointer to cv1k's dips
+ 
+@@ -409,6 +412,10 @@ void epic12_reset()
+ 		}
+ 	}
+ 
++#if defined(__PS5__) || defined(EPIC12_BLIT_TEST)
++    epic12_init_blend_tables();
++#endif
++
+ 	m_blitter_busy = 0;
+ 	m_gfx_addr = 0;
+ 	m_gfx_addr_shadowcopy = 0;
+@@ -793,6 +800,13 @@ static void gfx_draw(UINT32 *addr)
+ 	if ((s_mode==0 && s_alpha==0x1f) && (d_mode==4 && d_alpha==0x1f))
+ 		blend = 0;
+ 
++#if defined(__PS5__) || defined(EPIC12_BLIT_TEST)
++    if (blend && s_mode == 0 && d_mode == 0) {
++        epic12_draw_fixed(flipx, trans, draw_params);
++        return;
++    }
++#endif
++
+ 	if (tinted)
+ 	{
+ 		if (!flipx)
+diff --git a/src/burn/devices/epic12_fast_blit.h b/src/burn/devices/epic12_fast_blit.h
+new file mode 100644
+index 000000000..1112921e4
+--- /dev/null
++++ b/src/burn/devices/epic12_fast_blit.h
+@@ -0,0 +1,77 @@
++// Exact integer path for the fixed source/destination alpha blend used by
++// CV1000 effects. Keep the two source rounding/clamping stages in a compact
++// table, then saturate all three packed colour channels together.
++#ifndef FBNEO_EPIC12_FAST_BLIT_H
++#define FBNEO_EPIC12_FAST_BLIT_H
++
++static UINT8 epic12_source_scale[64][32][32];
++
++static void epic12_init_blend_tables()
++{
++	for (int tint = 0; tint < 64; tint++)
++		for (int alpha = 0; alpha < 32; alpha++)
++			for (int c = 0; c < 32; c++)
++				epic12_source_scale[tint][alpha][c] =
++					epic12_device_colrtable[epic12_device_colrtable[c][tint]][alpha];
++}
++
++static inline UINT32 epic12_packed_add(UINT32 s, UINT32 d)
++{
++	// Channels occupy bits 3..7 of separate bytes. Their carry bits fit in
++	// the gaps, so one word add and a mask implement three saturated adds.
++	UINT32 sum = s + d;
++	UINT32 carry = sum & 0x01010100;
++	return (sum | (carry - (carry >> 5))) & 0x00f8f8f8;
++}
++
++template<bool FlipX, bool Transparent, bool FullDestination>
++static void epic12_blend_fixed(BLIT_PARAMS)
++{
++	if (FlipX) src_x += dimx - 1;
++	int yf = flipy ? -1 : 1;
++	if (flipy) src_y += dimy - 1;
++
++	// Match the existing source-wrap rejection before destination clipping.
++	if (FlipX ? ((src_x & 0x1fff) < ((src_x - (dimx - 1)) & 0x1fff))
++	          : ((src_x & 0x1fff) > ((src_x + (dimx - 1)) & 0x1fff))) return;
++	int x0 = dst_x_start < clip->min_x ? clip->min_x - dst_x_start : 0;
++	int y0 = dst_y_start < clip->min_y ? clip->min_y - dst_y_start : 0;
++	int x1 = dimx, y1 = dimy;
++	if (dst_x_start + x1 - 1 > clip->max_x) x1 = clip->max_x - dst_x_start + 1;
++	if (dst_y_start + y1 - 1 > clip->max_y) y1 = clip->max_y - dst_y_start + 1;
++	if (x1 <= x0 || y1 <= y0) return;
++	epic12_device_blit_delay += (y1 - y0) * (x1 - x0);
++	const UINT8 *red = epic12_source_scale[tint_clr->r][s_alpha];
++	const UINT8 *green = epic12_source_scale[tint_clr->g][s_alpha];
++	const UINT8 *blue = epic12_source_scale[tint_clr->b][s_alpha];
++	const UINT8 *dest = epic12_device_colrtable[d_alpha];
++	for (int y = y0; y < y1; y++) {
++		UINT32 *out = m_bitmaps + (dst_y_start + y) * 0x2000 + dst_x_start + x0;
++		const UINT32 *in = gfx + (((src_y + yf * y) & 0x0fff) * 0x2000) + src_x + (FlipX ? -x0 : x0);
++		for (int x = x0; x < x1; x++, out++, in += FlipX ? -1 : 1) {
++			UINT32 pen = *in;
++			if (Transparent && !(pen & 0x20000000)) continue;
++			UINT32 s = (red[(pen >> 19) & 31] << 19) |
++			           (green[(pen >> 11) & 31] << 11) | (blue[(pen >> 3) & 31] << 3);
++			UINT32 d = *out;
++			if (FullDestination) d &= 0x00f8f8f8;
++			else d = (dest[(d >> 19) & 31] << 19) |
++			         (dest[(d >> 11) & 31] << 11) | (dest[(d >> 3) & 31] << 3);
++			*out = epic12_packed_add(s, d) | (pen & 0x20000000);
++		}
++	}
++}
++
++static void epic12_draw_fixed(int flipx, int transparent, BLIT_PARAMS)
++{
++#define EPIC12_FIXED_CALL(f,t,d) epic12_blend_fixed<f,t,d>(clip,gfx,src_x,src_y,dst_x_start,dst_y_start,dimx,dimy,flipy,s_alpha,d_alpha,tint_clr)
++	if (d_alpha == 31) {
++		if (flipx) { if (transparent) EPIC12_FIXED_CALL(true,true,true); else EPIC12_FIXED_CALL(true,false,true); }
++		else { if (transparent) EPIC12_FIXED_CALL(false,true,true); else EPIC12_FIXED_CALL(false,false,true); }
++	} else {
++		if (flipx) { if (transparent) EPIC12_FIXED_CALL(true,true,false); else EPIC12_FIXED_CALL(true,false,false); }
++		else { if (transparent) EPIC12_FIXED_CALL(false,true,false); else EPIC12_FIXED_CALL(false,false,false); }
++	}
++#undef EPIC12_FIXED_CALL
++}
++#endif
+diff --git a/src/burn/drv/cave/cv1k_ps5_profile.h b/src/burn/drv/cave/cv1k_ps5_profile.h
+new file mode 100644
+index 000000000..6c6856e5e
+--- /dev/null
++++ b/src/burn/drv/cave/cv1k_ps5_profile.h
+@@ -0,0 +1,62 @@
++// Bounded phase measurements; CPU phase includes memory/device handlers.
++#ifndef CV1K_PS5_PROFILE_H
++#define CV1K_PS5_PROFILE_H
++#if defined(__PS5__)
++#include <time.h>
++#include <stdio.h>
++#include <errno.h>
++extern "C" void pemu_boot_mark(const char *) __attribute__((weak));
++static UINT64 cvp_start, cvp_last, cvp_total[4];
++static unsigned cvp_frames, cvp_reports;
++static UINT64 cvp_now() {
++    const int saved = errno;
++    struct timespec t;
++    const int rc = clock_gettime(CLOCK_MONOTONIC, &t);
++    errno = saved;
++    return rc ? 0 : (UINT64)t.tv_sec * 1000000 + t.tv_nsec / 1000;
++}
++static void cvp_reset() {
++    cvp_start = cvp_last = 0; cvp_frames = cvp_reports = 0;
++    memset(cvp_total, 0, sizeof(cvp_total));
++}
++static void cvp_load(const char *stage, UINT64 start) {
++    if (!pemu_boot_mark) return;
++    const int saved = errno;
++    char line[180];
++    snprintf(line, sizeof(line), "CV_LOAD game=%s stage=%s us=%llu",
++        BurnDrvGetTextA(DRV_NAME), stage, (unsigned long long)(cvp_now() - start));
++    pemu_boot_mark(line); errno = saved;
++}
++static void cvp_begin() {
++    if (cvp_reports >= 12) return;
++    cvp_last = cvp_now(); if (!cvp_start) cvp_start = cvp_last;
++}
++static void cvp_phase(unsigned phase) {
++    if (cvp_reports >= 12) return;
++    UINT64 now = cvp_now();
++    if (now >= cvp_last) cvp_total[phase] += now - cvp_last;
++    cvp_last = now;
++    if (phase != 3) return;
++    ++cvp_frames;
++    if (now - cvp_start < 5000000) return;
++    const int saved = errno;
++    char line[192];
++    snprintf(line, sizeof(line),
++        "CV_PERF game=%s frames=%u cpu_us=%llu audio_us=%llu sync_us=%llu draw_us=%llu clock=%d dips=%02x",
++        BurnDrvGetTextA(DRV_NAME), cvp_frames,
++        (unsigned long long)(cvp_total[0]/cvp_frames), (unsigned long long)(cvp_total[1]/cvp_frames),
++        (unsigned long long)(cvp_total[2]/cvp_frames), (unsigned long long)(cvp_total[3]/cvp_frames),
++        DriverClock, DrvDips[1]);
++    if (pemu_boot_mark) pemu_boot_mark(line);
++    errno = saved;
++    ++cvp_reports; cvp_frames = 0; cvp_start = now;
++    memset(cvp_total, 0, sizeof(cvp_total));
++}
++#else
++static UINT64 cvp_now() { return 0; }
++static void cvp_reset() {}
++static void cvp_load(const char *, UINT64) {}
++static void cvp_begin() {}
++static void cvp_phase(unsigned) {}
++#endif
++#endif
+diff --git a/src/burn/drv/cave/d_cv1k.cpp b/src/burn/drv/cave/d_cv1k.cpp
+index c009baea5..e2e9fffcb 100644
+--- a/src/burn/drv/cave/d_cv1k.cpp
++++ b/src/burn/drv/cave/d_cv1k.cpp
+@@ -43,6 +43,8 @@ static INT32 DriverClock; // selected cpu clockrate
+ static INT32 nPrevBurnCPUSpeedAdjust;
+ static UINT8 nPrevCPUTenth;
+ static INT32 speedhack_burn; // 10ms @ cpu clock, calculated in DrvFrame
++#include "cv1k_ps5_profile.h"
++
+ 
+ static struct BurnInputInfo Cv1kInputList[] = {
+ 	{"P1 Coin",			BIT_DIGITAL,	DrvJoy1 + 2,	"p1 coin"	},
+@@ -480,10 +482,16 @@ static INT32 DrvInit()
+ 	BurnDrvGetRomInfo(&ri, 0);
+ 	if (ri.nLen >= 0x400000) is_type_d = 1;
+ 
++	cvp_reset();
++	UINT64 load_begin = cvp_now();
+ 	BurnAllocMemIndex();
++	cvp_load("allocate", load_begin);
+ 	GenericTilesInit();
+ 
+-	if (DrvLoadRoms()) { return 1; }
++	load_begin = cvp_now();
++	if (DrvLoadRoms()) { cvp_load("roms failed", load_begin); return 1; }
++	cvp_load("roms", load_begin);
++	load_begin = cvp_now();
+ 
+ 	Sh3Init(0, SH3_CLOCK, 0, 0, 0, 0, 0, 1, 0, 1, 0);
+ 	Sh3Open(0);
+@@ -520,6 +528,8 @@ static INT32 DrvInit()
+ 	ymz770_set_buffered(Sh3TotalCycles, SH3_CLOCK);
+ 	DrvDoReset();
+ 
++	cvp_load("devices/reset", load_begin);
++
+ 	return 0;
+ }
+ 
+@@ -607,6 +617,7 @@ static INT32 DrvFrame()
+ 	INT32 nCyclesTotal[1] = { DriverClock / 60 };
+ 	INT32 nCyclesDone[1] = { nExtraCycles[0] };
+ 
++	cvp_begin();
+ 	Sh3Open(0);
+ 
+ 	for (INT32 i = 0; i < nInterleave; i++)
+@@ -616,10 +627,12 @@ static INT32 DrvFrame()
+ 
+ 	Sh3SetIRQLine(2, CPU_IRQSTATUS_HOLD);
+ 
++	cvp_phase(0);
+ 	if (pBurnSoundOut) {
+ 		ymz770_update(pBurnSoundOut, nBurnSoundLen);
+ 	}
+ 
++	cvp_phase(1);
+ 	nExtraCycles[0] = nCyclesDone[0] - nCyclesTotal[0];
+ 
+ 	Sh3Close();
+@@ -630,10 +643,13 @@ static INT32 DrvFrame()
+ 		epic12_wait_blitterthread();
+ 	}
+ 
++	cvp_phase(2);
+ 	if (pBurnDraw) {
+ 		BurnDrvRedraw();
+ 	}
+ 
++	cvp_phase(3);
++
+ 	return 0;
+ }
+ 
+diff --git a/src/burner/state.cpp b/src/burner/state.cpp
+index fd03054a6..48212336c 100644
+--- a/src/burner/state.cpp
++++ b/src/burner/state.cpp
+@@ -1,6 +1,19 @@
+ // Driver Save State module
+ #include "burner.h"
+ 
++#if defined(__PS5__)
++extern "C" void *pemu_native_state_malloc(size_t) __attribute__((weak));
++static void *pemu_state_malloc(size_t size) {
++    return pemu_native_state_malloc ? pemu_native_state_malloc(size) : malloc(size);
++}
++extern "C" void pemu_native_state_free(void *) __attribute__((weak));
++static void pemu_state_free(void *p) {
++    if (pemu_native_state_free) pemu_native_state_free(p); else free(p);
++}
++#define malloc pemu_state_malloc
++#define free pemu_state_free
++#endif
++
+ #include "inputbuf.h"
+ 
+ // from replay.cpp
+@@ -92,6 +105,10 @@ INT32 BurnStateLoadEmbed(FILE* fp, INT32 nOffset, INT32 bAll, INT32 (*pLoadGame)
+ 	}
+ 
+ 	INT32 nChunkData = ftell(fp);
++    if (nChunkData < 0 || fseek(fp, 0, SEEK_END) != 0) return -1;
++    long fileEnd = ftell(fp);
++    if (fileEnd < nChunkData || nChunkSize > fileEnd - nChunkData ||
++        fseek(fp, nChunkData, SEEK_SET) != 0) return -1;
+ 
+ 	fread(&nFileVer, 1, 4, fp);							// Version of FB that this file was saved from
+ 
+@@ -104,7 +121,8 @@ INT32 BurnStateLoadEmbed(FILE* fp, INT32 nOffset, INT32 bAll, INT32 (*pLoadGame)
+ 		nFileMin = t1;
+ 	}
+ 
+-	fread(&nDefLen, 1, 4, fp);							// Get the size of the compressed data block
++	if (fread(&nDefLen, 1, 4, fp) != 4 || nDefLen < 8 ||
++        nDefLen > nChunkSize - 0x40) return -1;							// Get the size of the compressed data block
+ 
+ 	memset(szForName, 0, sizeof(szForName));
+ 	fread(szForName, 1, 32, fp);
+@@ -174,7 +192,7 @@ INT32 BurnStateLoadEmbed(FILE* fp, INT32 nOffset, INT32 bAll, INT32 (*pLoadGame)
+ 		return -1;
+ 	}
+ 	memset(Def, 0, nDefLen);
+-	fread(Def, 1, nDefLen, fp);							// Read in deflated block
++	if (fread(Def, 1, nDefLen, fp) != (size_t)nDefLen) { free(Def); return -1; }							// Read in deflated block
+ 
+ 	nRet = BurnStateDecompress(Def, nDefLen, bAll);		// Decompress block into driver
+ 	free(Def);											// free deflated block
+@@ -197,7 +215,7 @@ INT32 BurnStateLoad(TCHAR* szName, INT32 bAll, INT32 (*pLoadGame)())
+ {
+ 	const char szHeader[] = "FB1 ";						// File identifier
+ 	char szReadHeader[4] = "";
+-	INT32 nRet = 0;
++	INT32 nRet = 1;
+ 
+ 	FILE* fp = _tfopen(szName, _T("rb"));
+ 	if (fp == NULL) {
+@@ -334,7 +352,8 @@ INT32 BurnStateSaveEmbed(FILE* fp, INT32 nOffset, INT32 bAll)
+ 	fwrite(&nZero, 1, 4, fp);							//
+ 
+ 	nRet = BurnStateCompress(&Def, &nDefLen, bAll);		// Compress block from driver and return deflated buffer
+-	if (Def == NULL) {
++	if (nRet != 0 || Def == NULL) {
++        free(Def);
+ 		return -1;
+ 	}
+ 
+@@ -536,7 +555,8 @@ INT32 BurnStateSave(TCHAR* szName, INT32 bAll)
+ 		if(input_buf)   free(input_buf);
+ 	}
+ 
+-	fclose(fp);
++	if (ferror(fp)) nRet = -1;
++	if (fclose(fp) != 0) nRet = -1;
+ 
+ 	if (nRet < 0) {
+ 		return 1;
+diff --git a/src/burner/statec.cpp b/src/burner/statec.cpp
+index 8d1bab93a..b75626197 100644
+--- a/src/burner/statec.cpp
++++ b/src/burner/statec.cpp
+@@ -1,6 +1,20 @@
+ // FB Neo Driver State load/save from buffer module        - dink 2024
+ #include "burnint.h"
+ 
++#if defined(__PS5__)
++extern "C" void *pemu_native_state_malloc(size_t) __attribute__((weak));
++static void *pemu_state_malloc(size_t size) {
++    return pemu_native_state_malloc ? pemu_native_state_malloc(size) : malloc(size);
++}
++extern "C" void pemu_native_state_free(void *) __attribute__((weak));
++static void pemu_state_free(void *p) {
++    if (pemu_native_state_free) pemu_native_state_free(p); else free(p);
++}
++#define malloc pemu_state_malloc
++#define free pemu_state_free
++#endif
++#include <limits.h>
++
+ // BurnStateCompress: Save a state, "Compress" == organized into a buffer
+ // BurnStateDecompress: Load a state from buffer
+ 
+@@ -14,6 +28,7 @@ static INT32 nCalculatedLength = 0; // calculated size from driver
+ static INT32 nCalculatedVars = 0; // calculated variable count from driver
+ static INT32 nBufferPosition = 0; // position of load/save progress
+ static bool bNeedToRecover = false;
++static bool bStateError = false;
+ static UINT8 *Buffer = NULL;
+ static UINT8 *pBuffer = NULL;
+ 
+@@ -49,14 +64,21 @@ static void GetFromBuffer(void *data, UINT32 data_size)
+ static INT32 __cdecl LenAcb(struct BurnArea* pba)
+ {
+ 	// block id, data length, data name hash, data
+-	nCalculatedLength += STATE_SIZE_1_ENTRY + pba->nLen;
++	if (bStateError || pba->nLen > (UINT32)(INT_MAX - nCalculatedLength) ||
++        STATE_SIZE_1_ENTRY > (UINT32)(INT_MAX - nCalculatedLength) - pba->nLen) {
++        bStateError = true;
++        return 1;
++    }
++    nCalculatedLength += STATE_SIZE_1_ENTRY + pba->nLen;
+ 	nCalculatedVars ++;
+ 	return 0;
+ }
+ 
+ static INT32 __cdecl SaveAcb(struct BurnArea* pba)
+ {
+-	if (pba->nLen + STATE_SIZE_1_ENTRY + nBufferPosition > nCalculatedLength) {
++	if (bStateError || (UINT32)(nCalculatedLength - nBufferPosition) < STATE_SIZE_1_ENTRY ||
++        pba->nLen > (UINT32)(nCalculatedLength - nBufferPosition) - STATE_SIZE_1_ENTRY) {
++        bStateError = true;
+ 		stateclog((0, _T("SaveAcb(): No space for \"%S\"  nCalculatedLength  %x  pba->nLen  %x  nBufferPosition  %x\n"), pba->szName, nCalculatedLength, pba->nLen, nBufferPosition));
+ 		return 1;
+ 	}
+@@ -89,7 +111,7 @@ static INT32 __cdecl LoadAcb(struct BurnArea* pba)
+ 	UINT32 nBufferPositionSave = nBufferPosition;
+ 
+ 	do {
+-		if (pba->nLen + STATE_SIZE_1_ENTRY + nBufferPosition > nStateLoadFileLength) {
++		if ((UINT32)(nStateLoadFileLength - nBufferPosition) < STATE_SIZE_1_ENTRY || pba->nLen > (UINT32)(nStateLoadFileLength - nBufferPosition) - STATE_SIZE_1_ENTRY) {
+ 			stateclog((0, _T("LoadAcb(): No space to load \"%S\"  nCalculatedLength  %x  pba->nLen  %x  nBufferPosition  %x\n"), pba->szName, nCalculatedLength, pba->nLen, nBufferPosition));
+ 			break;
+ 		}
+@@ -123,6 +145,7 @@ static INT32 __cdecl LoadAcb(struct BurnArea* pba)
+ 	} while (!gotit && ++tries < 50);
+ 
+ 	if (gotit == false) {
++        bStateError = true;
+ 		stateclog((0, _T("Can't seem to match, let's rewind pBuffer!\n")));
+ 
+ 		bNeedToRecover = true;
+@@ -143,6 +166,10 @@ static INT32 __cdecl LoadAcb(struct BurnArea* pba)
+ INT32 BurnStateCompress(UINT8** pDef, INT32* pnDefLen, INT32 bAll)
+ {
+ 	UINT32 nAddEEPROM = (bWithEEPROM) ? ACB_EEPROM : 0;
++    if (!pDef || !pnDefLen) return 1;
++    *pDef = NULL;
++    *pnDefLen = 0;
++    bStateError = false;
+ 
+ 	nCalculatedLength = STATE_SIZE_HEADER;
+ 	nCalculatedVars = 0;
+@@ -154,7 +181,9 @@ INT32 BurnStateCompress(UINT8** pDef, INT32* pnDefLen, INT32 bAll)
+ 	stateclog((0, _T("BurnStateCompress(Save): Sizes, Calculated:  %x  Entries:  %x\n"), nCalculatedLength, nCalculatedVars));
+ 
+ 	// Set-up the buffer
++    if (bStateError) return 1;
+ 	Buffer = (UINT8*)malloc(nCalculatedLength); // note: this is free()'d in state.cpp
++    if (!Buffer) return 1;
+ 	nBufferPosition = 0;
+ 	pBuffer = Buffer;
+ 	BurnAcb = SaveAcb;
+@@ -167,7 +196,11 @@ INT32 BurnStateCompress(UINT8** pDef, INT32* pnDefLen, INT32 bAll)
+ 	if (bAll) BurnAreaScan(ACB_FULLSCAN | ACB_READ, NULL);				// scan all ram (read from driver variables)
+ 	else      BurnAreaScan(ACB_NVRAM | nAddEEPROM | ACB_READ, NULL);	// scan nvram
+ 
+-	if (pDef) *pDef = Buffer;
++	if (bStateError || nBufferPosition != nCalculatedLength) {
++        free(Buffer); Buffer = pBuffer = NULL;
++        return 1;
++    }
++    if (pDef) *pDef = Buffer;
+ 	if (pnDefLen) *pnDefLen = nCalculatedLength;
+ 
+ 	return 0;
+@@ -178,6 +211,24 @@ INT32 BurnStateDecompress(UINT8* Def, INT32 nDefLen, INT32 bAll)
+ {
+ 	UINT32 nAddEEPROM = (bWithEEPROM) ? ACB_EEPROM : 0;
+ 
++    // Validate the complete record stream before any ACB_WRITE scan. Corrupt
++    // lengths must not advance pointers outside the allocation or partially load.
++    if (!Def || nDefLen <= (INT32)STATE_SIZE_HEADER) return 1;
++    UINT32 id;
++    memcpy(&id, Def, sizeof(id));
++    if (id != BLOCK_ID_STATE) return 1;
++    size_t position = STATE_SIZE_HEADER;
++    while (position < (size_t)nDefLen) {
++        if ((size_t)nDefLen - position < STATE_SIZE_1_ENTRY) return 1;
++        UINT32 length;
++        memcpy(&id, Def + position, sizeof(id));
++        memcpy(&length, Def + position + 4, sizeof(length));
++        if (id != BLOCK_ID_VARIABLE) return 1;
++        position += STATE_SIZE_1_ENTRY;
++        if (length > (size_t)nDefLen - position) return 1;
++        position += length;
++    }
++    bStateError = false;
+ 	nStateLoadFileLength = nDefLen;
+ 
+ 	nCalculatedLength = 0;
+@@ -207,5 +258,5 @@ INT32 BurnStateDecompress(UINT8* Def, INT32 nDefLen, INT32 bAll)
+ 	if (bAll) BurnAreaScan(ACB_FULLSCAN | ACB_WRITE, NULL);             // scan all ram (write to driver variables)
+ 	else      BurnAreaScan(ACB_NVRAM | nAddEEPROM | ACB_WRITE, NULL);	// scan nvram
+ 
+-	return 0;
++	return bStateError ? 1 : 0;
+ }
 diff --git a/src/intf/video/vid_interface.cpp b/src/intf/video/vid_interface.cpp
+index 225329c06..f375e2659 100644
 --- a/src/intf/video/vid_interface.cpp
 +++ b/src/intf/video/vid_interface.cpp
 @@ -54,7 +54,7 @@ static struct VidOut *pVidOut[] = {

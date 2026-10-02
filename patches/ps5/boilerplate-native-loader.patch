@@ -1,0 +1,21 @@
+--- a/tooling/native/sce_module_writer.cpp
++++ b/tooling/native/sce_module_writer.cpp
+@@ -838,7 +838,17 @@
+             continue;
+         copy_bytes(output, input.file_offset, input.data);
+     }
+-    const std::uint64_t relro_file = got.file_offset;
++    // .got may follow a large .data.rel.ro (pEMU has several MiB). The
++    // segment must start at relro_start, with the original file/VA mapping.
++    require(got.address >= relro_start && got.file_offset >= got.address - relro_start,
++            "invalid LLVM GOT/RELRO mapping");
++    const std::uint64_t relro_file = got.file_offset - (got.address - relro_start);
++    require(relro_file % kPage == relro_start % kPage,
++            "LLVM RELRO file and virtual offsets are not page-congruent");
++    for (const Section &input : image.sections)
++        if (input.allocated() && !input.no_bits() && relro_section(input.name))
++            require(input.file_offset == relro_file + input.address - relro_start,
++                    "LLVM RELRO sections do not share a contiguous mapping");
+     copy_bytes(output, relro_file + process_address - relro_start, process_parameters);
+     copy_bytes(output, relro_file + blocks_address - relro_start, blocks.data);
+     copy_bytes(output, dynamic_file_at(string_address), dynamic_strings);

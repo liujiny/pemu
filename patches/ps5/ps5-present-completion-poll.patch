@@ -1,0 +1,32 @@
+--- a/src/platform/ps5_agc_native_runtime.c
++++ b/src/platform/ps5_agc_native_runtime.c
+@@ -1059,6 +1059,7 @@
+ static int runtime_video_wait_idle(void);
+ 
+ #ifdef PS5_GPU_PRESENT_BATCH
++#include "util/os_time.h"
+ int ps5_agc_gate2_batch_present(unsigned buffer_index)
+ {
+     if (buffer_index > 1 || runtime_gpu_present_buffer >= 0 ||
+@@ -1104,7 +1105,8 @@
+ {
+     if (runtime_gpu_present_buffer != (int)buffer_index)
+         return -1;
+-    for (unsigned waits = 0; waits <= 120; ++waits) {
++    const int64_t deadline = os_time_get_nano() + INT64_C(2000000000);
++    for (;;) {
+         uint64_t status[16] = {0};
+         int result = runtime_video_api.get_flip_status(runtime_video_handle, status);
+         if (result != 0)
+@@ -1117,9 +1119,9 @@
+             ++runtime_gpu_present_count;
+             return 0;
+         }
+-        if (waits == 120)
++        if (os_time_get_nano() >= deadline)
+             return -1;
+-        result = runtime_video_api.wait_vblank(runtime_video_handle);
++        result = sceKernelUsleep(100);
+         if (result != 0)
+             return result;
+     }

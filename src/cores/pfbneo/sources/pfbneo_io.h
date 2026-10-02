@@ -9,10 +9,23 @@
 
 extern void BurnPathsInit(C2DIo *io);
 
+#if defined(__PS5__) || defined(__PROSPERO__)
+// Only the native title CRT supplies this; payload builds retain their paths.
+extern "C" const char *pemu_native_data_path() __attribute__((weak));
+#endif
+
 namespace c2d {
     class PFBAIo : public c2d::C2DIo {
     public:
         PFBAIo() : C2DIo() {
+#if defined(__PS5__) || defined(__PROSPERO__)
+            // Native titles may reject chdir even though /app0 is accessible.
+            // Set the root before create/BurnPathsInit can query getDataPath.
+            if (pemu_native_data_path) {
+                const char *path = pemu_native_data_path();
+                if (path && *path) C2DIo::setDataPath(path);
+            }
+#endif
             C2DIo::create(PFBAIo::getDataPath());
             C2DIo::create(PFBAIo::getDataPath() + "configs");
             C2DIo::create(PFBAIo::getDataPath() + "saves");

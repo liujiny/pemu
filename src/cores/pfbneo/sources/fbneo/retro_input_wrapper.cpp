@@ -60,7 +60,15 @@ int16_t input_cb(unsigned port, unsigned device, unsigned index, unsigned id) {
     return 0;
 }
 
+#ifdef __PS5__
+extern "C" void pemu_native_game_input(unsigned buttons) __attribute__((weak));
+#endif
+
 void poll_cb() {
+#ifdef __PS5__
+    if (pemu_native_game_input && c2d_renderer && c2d_renderer->getInput())
+        pemu_native_game_input(c2d_renderer->getInput()->getPlayer(0)->buttons);
+#endif
     // 确保脉冲计数器每帧只递增一次，不会因多按键轮询而错乱
     s_frame_pulse_counter++;
 }

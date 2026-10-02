@@ -9,3 +9,20 @@ ss_user_pwd.key
 keystore.properties
 build-ps4/
 build-vita/
+
+# Local PS5 toolchains, dependencies and output
+.build-tools/
+.deps/
+SDL/
+ps5-opengl/
+ps5-native-app-boilerplate/
+build-pemu/
+build-ps5-sdl2/
+__pycache__/
+*.pyc
+*.log
+*.xex
+*.elf
+*.bin
+*.prx
+external/*.lnk

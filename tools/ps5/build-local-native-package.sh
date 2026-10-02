@@ -68,7 +68,11 @@ done
 for data_dir in \
     "$pemu_build/src/cores/pfbneo/data_datadir" \
     "$pemu_build/src/cores/pfbneo/data_romfs"; do
-    test ! -d "$data_dir" || cp -a "$data_dir/." "$stage/assets/"
+    if [[ -d $data_dir ]]; then
+        cp -a "$data_dir/." "$stage/assets/"
+        mkdir -p "$stage/${data_dir##*/}"
+        cp -a "$data_dir/." "$stage/${data_dir##*/}/"
+    fi
 done
 
 archives=(
@@ -125,6 +129,8 @@ test -f "$app/eboot.bin"
 test -f "$app/sce_sys/param.json"
 test -f "$app/sce_module/libc.prx"
 test -d "$app/assets"
+test -f "$app/data_romfs/skins/default/config.cfg"
+test -f "$app/data_romfs/skins/default/default.ttf"
 "$tool" self --inspect --file "$app/eboot.bin" > "$stage/ps5-native-inspect.txt"
 "$tool" self --inspect --file "$app/sce_module/libc.prx" >> "$stage/ps5-native-inspect.txt"
 printf '[PS5 LOCAL] native package=%s\n' "$app"

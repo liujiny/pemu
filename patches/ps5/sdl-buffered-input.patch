@@ -1,0 +1,91 @@
+--- a/src/joystick/ps5/SDL_ps5joystick.c
++++ b/src/joystick/ps5/SDL_ps5joystick.c
+@@ -185,24 +185,12 @@
+     return SDL_TRUE;
+ }
+ 
+-static void PS5_JoystickUpdate(SDL_Joystick *joystick)
+-{
+-    PS5_PadContext *ctx = PS5_JoystickGetPadContext(joystick);
++static void PS5_PublishPad(SDL_Joystick *joystick, PS5_PadContext *ctx,
++                           const PS5_PadData *sample)
++{
+     uint32_t btn_change;
+-    PS5_PadData pad;
++    const PS5_PadData pad = *sample;
+     uint8_t hat = 0;
+-    int err;
+-
+-    if (!ctx) {
+-        SDL_SetError("PS5_JoystickUpdate: instance not connected");
+-        return;
+-    }
+-
+-    err = scePadReadState(ctx->handle, &pad);
+-    if(err) {
+-        SDL_SetError("scePadReadState: 0x%08x", err);
+-        return;
+-    }
+ 
+     /* Detection owns removal; never publish disconnected sample contents. */
+     if (!pad.connected) return;
+@@ -229,23 +217,49 @@
+                     SDL_PrivateJoystickButton(joystick, i, SDL_RELEASED);
+                 }
+ 
+-                // handle hat
+-                if (i == 11 && (pad.buttons & btn_map[i])) {
+-                    hat |= SDL_HAT_UP;
+-                } else if (i == 12 && (pad.buttons & btn_map[i])) {
+-                    hat |= SDL_HAT_DOWN;
+-                } else if (i == 13 && (pad.buttons & btn_map[i])) {
+-                    hat |= SDL_HAT_LEFT;
+-                } else if (i == 14 && (pad.buttons & btn_map[i])) {
+-                    hat |= SDL_HAT_RIGHT;
+-                }
+             }
+         }
++        if (pad.buttons & PS5_PAD_BUTTON_UP) hat |= SDL_HAT_UP;
++        if (pad.buttons & PS5_PAD_BUTTON_DOWN) hat |= SDL_HAT_DOWN;
++        if (pad.buttons & PS5_PAD_BUTTON_LEFT) hat |= SDL_HAT_LEFT;
++        if (pad.buttons & PS5_PAD_BUTTON_RIGHT) hat |= SDL_HAT_RIGHT;
+         // send hat events now
+         SDL_PrivateJoystickHat(joystick, 0, hat);
+     }
+ 
+     memcpy(&ctx->pad, &pad, sizeof(pad));
++}
++
++/* Altered for pEMU native: preserve short presses between frame polls.
++ * The native RetroArch input port uses this 120-byte, 64-sample ABI too. */
++extern int scePadRead(int handle, void *samples, int capacity);
++_Static_assert(sizeof(PS5_PadData) == 120, "pad sample stride");
++_Static_assert(offsetof(PS5_PadData, timestamp) == 0x50, "pad timestamp offset");
++
++static void PS5_JoystickUpdate(SDL_Joystick *joystick)
++{
++    PS5_PadContext *ctx = PS5_JoystickGetPadContext(joystick);
++    PS5_PadData samples[64];
++    if (!ctx) return;
++    int count = scePadRead(ctx->handle, samples, SDL_arraysize(samples));
++    if (count < 0 || count > SDL_arraysize(samples)) {
++        /* Keep the established state reader available on service errors. */
++        if (scePadReadState(ctx->handle, samples) != 0) return;
++        count = 1;
++    }
++    /* Do not assume the service's batch order. Stable chronological replay
++     * leaves SDL's live state at the newest sample and queues every edge. */
++    for (int i = 1; i < count; ++i) {
++        PS5_PadData sample = samples[i];
++        int j = i;
++        while (j > 0 && samples[j-1].timestamp > sample.timestamp) {
++            samples[j] = samples[j-1];
++            --j;
++        }
++        samples[j] = sample;
++    }
++    for (int i = 0; i < count; ++i)
++        PS5_PublishPad(joystick, ctx, &samples[i]);
+ }
+ 
+ static SDL_JoystickGUID PS5_JoystickGetDeviceGUID(int device_index)

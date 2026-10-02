@@ -1,0 +1,24 @@
+--- a/tooling/native/sce_module_writer.cpp
++++ b/tooling/native/sce_module_writer.cpp
+@@ -787,6 +787,12 @@
+     const Bytes rela_dynamic = write_relocations(relocations);
+     const Section *source_plt = optional_section(image, ".rela.plt");
+     const Bytes rela_plt = source_plt == nullptr ? Bytes{} : source_plt->data;
++    // DT_PLTGOT describes the PLT resolver's reserved slots, not the ordinary
++    // GOT. Replacing it with .got overwrites application pointers when those
++    // sections are separate (pEMU's CRT keeps constructor boundaries there).
++    const std::uint64_t plt_got = dynamic_value(dynamic_source, kDynamicPltGot);
++    require(rela_plt.empty() || plt_got != 0,
++            "LLVM PLT relocations have no DT_PLTGOT");
+     const Bytes note = build_note();
+ 
+     data_end = std::max(data_end, data_start + 8);
+@@ -802,7 +808,7 @@
+     const Bytes dynamic = build_dynamic(
+         modules, libraries, module_name_offset, file_name_offset, symbol_address, string_address,
+         dynamic_strings.size(), hash_address, hash.size(), jump_address, rela_plt.size(),
+-        got.address, dynamic_symbols.size(), relocation_address, rela_dynamic.size(),
++        plt_got, dynamic_symbols.size(), relocation_address, rela_dynamic.size(),
+         relative_count, dynamic_value(dynamic_source, kDynamicPreinitArray),
+         dynamic_value(dynamic_source, kDynamicPreinitArraySize),
+         dynamic_value(dynamic_source, kDynamicInitArray),

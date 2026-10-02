@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 919c84a..ae8e645 100644
+index 919c84a..ff6dea5 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -78,9 +78,23 @@ if (PLATFORM_VITA)
@@ -27,7 +27,21 @@ index 919c84a..ae8e645 100644
  endif ()
  
  if (PLATFORM_PS4)
-@@ -157,12 +171,41 @@ if (OPTION_SDL1)
+@@ -121,9 +135,11 @@ if (NOT PLATFORM_PS3)
+     pkg_search_module(ZLIB REQUIRED zlib)
+ endif ()
+ 
+-set(C2D_CFLAGS -Wall -Wno-narrowing -DLIBCONFIG_STATIC -D__CROSS2D__)
++# Keep platform options collected above (including PS5's existing GL 3.3 path).
++# Replacing these lists here silently built the generic GL 4.3 startup instead.
++list(APPEND C2D_CFLAGS -Wall -Wno-narrowing -DLIBCONFIG_STATIC -D__CROSS2D__)
+ set(C2D_INCLUDES include ${FREETYPE_INCLUDE_DIRS} ${PNG_INCLUDE_DIRS} ${ZLIB_INCLUDE_DIRS})
+-set(C2D_LDFLAGS ${FREETYPE_LIBRARIES} ${PNG_LIBRARIES} ${ZLIB_LIBRARIES})
++list(APPEND C2D_LDFLAGS ${FREETYPE_LIBRARIES} ${PNG_LIBRARIES} ${ZLIB_LIBRARIES})
+ set(CMAKE_CXX_STANDARD 17)
+ 
+ if (NOT OPTION_FREETYPE)
+@@ -157,12 +173,41 @@ if (OPTION_SDL1)
  endif ()
  
  if (OPTION_SDL2)
@@ -72,7 +86,7 @@ index 919c84a..ae8e645 100644
      file(GLOB SDL2_SRC source/platforms/sdl2/*.c*)
      list(APPEND C2D_SOURCES ${SDL2_SRC})
      if (OPTION_SDL2_RGB565)
-@@ -187,7 +230,7 @@ if (OPTION_RENDER_GL2 OR OPTION_RENDER_GLES2 OR OPTION_RENDER_GLES3)
+@@ -187,7 +232,7 @@ if (OPTION_RENDER_GL2 OR OPTION_RENDER_GLES2 OR OPTION_RENDER_GLES3)
          if (NOT PLATFORM_PS4)
              list(APPEND C2D_LDFLAGS GLESv2)
          endif ()
@@ -162,11 +176,134 @@ index a613276..dac840c 100644
  
      class GLShaderList : public ShaderList {
  
+diff --git a/include/cross2d/platforms/gl2/ps5_scanout_shader.h b/include/cross2d/platforms/gl2/ps5_scanout_shader.h
+new file mode 100644
+index 0000000..03f3ac0
+--- /dev/null
++++ b/include/cross2d/platforms/gl2/ps5_scanout_shader.h
+@@ -0,0 +1,20 @@
++// PS5 native G19 scanout compatibility: its RGBA render target is registered
++// with the system BGRA display format. Encode only the default framebuffer.
++#pragma once
++#include <string>
++namespace c2d {
++inline std::string ps5ScanoutFragment(std::string source) {
++    const char *output = source.find("out vec4 fragColor") != std::string::npos ? "fragColor" :
++                         (source.find("out vec4 FragColor") != std::string::npos || source.find("#define FragColor") != std::string::npos) ? "FragColor" : "gl_FragColor";
++    const auto versionEnd = source.find('\n');
++    if (versionEnd == std::string::npos) return source;
++    source.insert(versionEnd + 1, "#define main pemu_fragment_main\n");
++    source += "\n#undef main\nuniform int pemu_bgra_scanout;\nvoid main() {\n"
++              "pemu_fragment_main();\nif (pemu_bgra_scanout != 0) ";
++    source += output;
++    source += " = ";
++    source += output;
++    source += ".bgra;\n}\n";
++    return source;
++}
++}
+diff --git a/include/cross2d/platforms/gl2/ps5_triangles.h b/include/cross2d/platforms/gl2/ps5_triangles.h
+new file mode 100644
+index 0000000..d53c4f8
+--- /dev/null
++++ b/include/cross2d/platforms/gl2/ps5_triangles.h
+@@ -0,0 +1,26 @@
++// pEMU PS5: upload fan/strip geometry as equivalent triangle lists.
++#pragma once
++#include <cstddef>
++#include <vector>
++#include "cross2d/skeleton/sfml/PrimitiveType.hpp"
++namespace c2d {
++inline bool ps5TriangleList(PrimitiveType type) {
++    return type == TriangleStrip || type == TriangleFan;
++}
++inline std::size_t ps5TriangleVertexCount(PrimitiveType type, std::size_t count) {
++    return ps5TriangleList(type) ? (count < 3 ? 0 : (count - 2) * 3) : count;
++}
++template<class VertexType>
++void ps5ExpandTriangles(const std::vector<VertexType> &src, PrimitiveType type,
++                       std::vector<VertexType> &dst) {
++    dst.clear();
++    if (!ps5TriangleList(type)) { dst = src; return; }
++    dst.reserve(ps5TriangleVertexCount(type, src.size()));
++    for (std::size_t i = 0; i + 2 < src.size(); ++i) {
++        // Preserve winding, primitive order, degenerates and last provoking vertex.
++        const std::size_t a = type == TriangleFan ? 0 : i + (i & 1);
++        const std::size_t b = type == TriangleFan ? i + 1 : i + 1 - (i & 1);
++        dst.push_back(src[a]); dst.push_back(src[b]); dst.push_back(src[i + 2]);
++    }
++}
++}
+diff --git a/include/cross2d/platforms/sdl2/sdl2_audio.h b/include/cross2d/platforms/sdl2/sdl2_audio.h
+index 3600939..bf43a13 100644
+--- a/include/cross2d/platforms/sdl2/sdl2_audio.h
++++ b/include/cross2d/platforms/sdl2/sdl2_audio.h
+@@ -23,10 +23,16 @@ namespace c2d {
+         void reset() override;
+ 
+         SDL_AudioDeviceID getDeviceID();
++#if defined(__PS5__)
++        void fillBufferedAudio(Uint8 *stream, int len);
++#endif
+ 
+     private:
+ 
+-        SDL_AudioDeviceID deviceID;
++        SDL_AudioDeviceID deviceID = 0;
++#if defined(__PS5__)
++        bool m_priming = true;
++#endif
+     };
+ }
+ 
+diff --git a/include/cross2d/skeleton/ps5_profiler.h b/include/cross2d/skeleton/ps5_profiler.h
+new file mode 100644
+index 0000000..fb78f99
+--- /dev/null
++++ b/include/cross2d/skeleton/ps5_profiler.h
+@@ -0,0 +1,22 @@
++#ifndef C2D_PS5_PROFILER_H
++#define C2D_PS5_PROFILER_H
++
++#include <string>
++
++namespace c2d {
++namespace PS5Profiler {
++
++enum Stage { Core, Upload, VideoDraw, CRTDraw, UIDraw, Present, Frame };
++
++void beginFrame();
++void begin(Stage stage);
++void end(Stage stage);
++void endFrame();
++void setGameInfo(int width, int height, int pitch, const char *format);
++void setShader(const char *name);
++void setDisplaySize(int width, int height);
++
++} // namespace PS5Profiler
++} // namespace c2d
++
++#endif
 diff --git a/source/platforms/gl2/gl_renderer.cpp b/source/platforms/gl2/gl_renderer.cpp
-index 7307db7..aff2095 100644
+index 7307db7..376981a 100644
 --- a/source/platforms/gl2/gl_renderer.cpp
 +++ b/source/platforms/gl2/gl_renderer.cpp
-@@ -24,6 +24,21 @@ void GLRenderer::initGL() {
+@@ -12,7 +12,14 @@
+ 
+ #include "cross2d/c2d.h"
+ 
++#if defined(__PS5__)
++#include "cross2d/platforms/gl2/ps5_triangles.h"
++#endif
++
+ using namespace c2d;
++#if defined(__PS5__) || defined(__PROSPERO__)
++extern "C" void pemu_native_input_probe(unsigned) __attribute__((weak));
++#endif
+ 
+ GLRenderer::GLRenderer(const Vector2f &size) : Renderer(size) {
+     printf("GL2Renderer\n");
+@@ -24,6 +31,21 @@ void GLRenderer::initGL() {
      printf("GL version  : %s\n", glGetString(GL_VERSION));
      printf("GL glsl     : %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
  
@@ -188,7 +325,7 @@ index 7307db7..aff2095 100644
  #ifdef glGenVertexArrays
      // vao
      GL_CHECK(glGenVertexArrays(1, &vao));
-@@ -33,9 +48,13 @@ void GLRenderer::initGL() {
+@@ -33,9 +55,13 @@ void GLRenderer::initGL() {
  
      // init shaders
      m_shaderList = (ShaderList *) new GLShaderList();
@@ -202,7 +339,7 @@ index 7307db7..aff2095 100644
      Vertex *vertices;
      size_t vertexCount;
      GLTexture *tex;
-@@ -55,6 +74,15 @@ void GLRenderer::draw(VertexArray *vertexArray, const Transform &transform, Text
+@@ -55,9 +81,27 @@ void GLRenderer::draw(VertexArray *vertexArray, const Transform &transform, Text
      if (tex && tex->m_shader && tex->m_shader->available) {
          shader = (GLShader *) tex->m_shader;
      }
@@ -215,10 +352,48 @@ index 7307db7..aff2095 100644
 +    }
 +    PS5Profiler::begin(profileStage);
 +#endif
++
  
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(16);
++#endif
      // set shader
      GL_CHECK(glUseProgram(shader->GetProgram()));
-@@ -150,6 +178,9 @@ void GLRenderer::draw(VertexArray *vertexArray, const Transform &transform, Text
++#if defined(__PS5__)
++    GLint framebuffer = 0;
++    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
++    shader->SetUniform("pemu_bgra_scanout", framebuffer == 0 ? 1 : 0);
++#endif
+ 
+     // set projection
+ #if defined(__SDL2__)
+@@ -129,7 +173,25 @@ void GLRenderer::draw(VertexArray *vertexArray, const Transform &transform, Text
+ 
+     // draw
+     GLenum mode = modes[vertexArray->getPrimitiveType()];
++#if defined(__PS5__)
++    if (ps5TriangleList(vertexArray->getPrimitiveType())) {
++        mode = GL_TRIANGLES;
++        vertexCount = ps5TriangleVertexCount(vertexArray->getPrimitiveType(), vertexCount);
++    }
++#endif
++
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(17);
++#endif
++
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(14);
++#endif
+     GL_CHECK(glDrawArrays(mode, 0, (GLsizei) vertexCount));
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(15);
++#endif
++
+ 
+     GL_CHECK(glDisableVertexAttribArray(0));
+     GL_CHECK(glDisableVertexAttribArray(1));
+@@ -150,14 +212,23 @@ void GLRenderer::draw(VertexArray *vertexArray, const Transform &transform, Text
      vertexArray->unbind();
  
      GL_CHECK(glUseProgram(0));
@@ -228,11 +403,37 @@ index 7307db7..aff2095 100644
  }
  
  void GLRenderer::clear() {
+-    // clear screen
+-    GL_CHECK(glClearColor(m_clearColor.r / 255.0f,
+-                          m_clearColor.g / 255.0f,
+-                          m_clearColor.b / 255.0f,
+-                          m_clearColor.a / 255.0f));
++    // Match fragment output encoding only for the system display buffer.
++    auto clearColor = m_clearColor;
++#if defined(__PS5__)
++    GLint framebuffer = 0;
++    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
++    if (framebuffer == 0) std::swap(clearColor.r, clearColor.b);
++#endif
++    GL_CHECK(glClearColor(clearColor.r / 255.0f,
++                          clearColor.g / 255.0f,
++                          clearColor.b / 255.0f,
++                          clearColor.a / 255.0f));
+     GL_CHECK(glClear(GL_COLOR_BUFFER_BIT));
+ }
+ 
 diff --git a/source/platforms/gl2/gl_shaders.cpp b/source/platforms/gl2/gl_shaders.cpp
-index 1fabfdd..972255f 100644
+index 1fabfdd..3f01571 100644
 --- a/source/platforms/gl2/gl_shaders.cpp
 +++ b/source/platforms/gl2/gl_shaders.cpp
-@@ -25,7 +25,8 @@ static c2d::GLShaderDumper *shaderDumper;
+@@ -1,3 +1,6 @@
++#if defined(__PS5__)
++#include "cross2d/platforms/gl2/ps5_scanout_shader.h"
++#endif
+ //
+ // Created by cpasjuste on 27/01/17.
+ //
+@@ -25,7 +28,8 @@ static c2d::GLShaderDumper *shaderDumper;
  
  using namespace c2d;
  
@@ -242,7 +443,7 @@ index 1fabfdd..972255f 100644
      GLuint handle;
      GLint compile_result;
      GLchar msg[512];
-@@ -49,7 +50,10 @@ static GLuint compile(GLenum type, const char *source, int size = 0) {
+@@ -49,7 +53,10 @@ static GLuint compile(GLenum type, const char *source, int size = 0) {
      GL_CHECK(glGetShaderiv(handle, GL_COMPILE_STATUS, &compile_result));
      if (!compile_result) {
          glGetShaderInfoLog(handle, sizeof(msg), nullptr, msg);
@@ -254,7 +455,7 @@ index 1fabfdd..972255f 100644
          glDeleteShader(handle);
          return 0;
      }
-@@ -73,12 +77,12 @@ GLShader::GLShader(const std::string &n, const char *vertex, const char *fragmen
+@@ -73,12 +80,15 @@ GLShader::GLShader(const std::string &n, const char *vertex, const char *fragmen
          //printf("GLShader::GLShader: %s, version: %s\n", name.c_str(), version.c_str());
          v = std::string("#version " + version + "\n") + vertex;
          f = std::string("#version " + version + "\n") + fragment;
@@ -265,11 +466,14 @@ index 1fabfdd..972255f 100644
              return;
          }
 -        fsh = compile(GL_FRAGMENT_SHADER, f.c_str(), fragmentSize);
++#if defined(__PS5__)
++        f = ps5ScanoutFragment(f);
++#endif
 +        fsh = compile(GL_FRAGMENT_SHADER, f.c_str(), fragmentSize, n.c_str(), &version);
          if (!fsh) {
              glDeleteShader(vsh);
              printf("GLShader: fsh compilation failed\n");
-@@ -103,6 +107,11 @@ GLShader::GLShader(const std::string &n, const char *vertex, const char *fragmen
+@@ -103,6 +113,11 @@ GLShader::GLShader(const std::string &n, const char *vertex, const char *fragmen
          return;
      }
  
@@ -281,7 +485,7 @@ index 1fabfdd..972255f 100644
  #if defined(__PS4__) && defined(GL_DUMP_SHADERS)
          shaderDumper->dump((int) vsh, name, "v");
          shaderDumper->dump((int) fsh, name, "f");
-@@ -129,13 +138,13 @@ GLShader::GLShader(const std::string &n, const char *source, int size,
+@@ -129,13 +144,16 @@ GLShader::GLShader(const std::string &n, const char *source, int size,
      if (size <= 0) {
          vertex = std::string("#version " + version + "\n#define VERTEX\n") + source;
          fragment = std::string("#version " + version + "\n#define FRAGMENT\n") + source;
@@ -293,11 +497,14 @@ index 1fabfdd..972255f 100644
              return;
          }
 -        fsh = compile(GL_FRAGMENT_SHADER, fragment.c_str(), 0);
++#if defined(__PS5__)
++        fragment = ps5ScanoutFragment(fragment);
++#endif
 +        fsh = compile(GL_FRAGMENT_SHADER, fragment.c_str(), 0, name.c_str(), &version);
          if (!fsh) {
              glDeleteShader(vsh);
              printf("GLShader::GLShader: %s (version: %s): fsh compilation failed: %i (glGetError: %i)\n",
-@@ -171,42 +180,51 @@ GLShader::GLShader(const std::string &n, const char *source, int size,
+@@ -171,42 +189,51 @@ GLShader::GLShader(const std::string &n, const char *source, int size,
          return;
      }
  
@@ -381,11 +588,218 @@ index 34aba06..64c5105 100644
  }
  
  void GLTexture::setFilter(Filter f) {
+diff --git a/source/platforms/sdl2/sdl2_audio.cpp b/source/platforms/sdl2/sdl2_audio.cpp
+index d719d5b..b2fdd2e 100644
+--- a/source/platforms/sdl2/sdl2_audio.cpp
++++ b/source/platforms/sdl2/sdl2_audio.cpp
+@@ -6,9 +6,21 @@
+ #include "cross2d/c2d.h"
+ 
+ using namespace c2d;
++#if defined(__PS5__)
++extern "C" void pemu_boot_mark(const char *) __attribute__((weak));
++static void audioBootStatus(const char *stage) {
++    if (pemu_boot_mark) {
++        pemu_boot_mark(stage);
++        if (SDL_GetError()[0]) pemu_boot_mark(SDL_GetError());
++    }
++}
++#endif
+ 
+ static void audioThread(void *data, Uint8 *stream, int len) {
+     auto audio = (SDL2Audio *) data;
++#if defined(__PS5__)
++    audio->fillBufferedAudio(stream, len);
++#else
+     int samples = len >> 1;
+ 
+     //printf("c2d::sdl2audio::thread: want: %i (len: %i), queued: %i\n", samples, len, audio->getSampleBufferQueued());
+@@ -20,6 +32,7 @@ static void audioThread(void *data, Uint8 *stream, int len) {
+     } else {
+         memset(stream, 0, len);
+     }
++#endif
+ }
+ 
+ SDL2Audio::SDL2Audio(int freq, int samples, C2DAudioCallback cb) : Audio(freq, samples, cb) {
+@@ -38,9 +51,16 @@ SDL2Audio::SDL2Audio(int freq, int samples, C2DAudioCallback cb) : Audio(freq, s
+     //SDL_setenv("SDL_AUDIODRIVER", "android", 1);
+ #endif
+ 
++#if defined(__PS5__)
++    SDL_ClearError();
++    if (pemu_boot_mark) pemu_boot_mark("AUDIO SDL init begin");
++#endif
+     if (!SDL_WasInit(SDL_INIT_AUDIO)) {
+         if (SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+             printf("SDL2Audio: Initialize failed: %s.\n", SDL_GetError());
++#if defined(__PS5__)
++            audioBootStatus("AUDIO SDL init failed");
++#endif
+             available = false;
+             return;
+         }
+@@ -51,7 +71,7 @@ SDL2Audio::SDL2Audio(int freq, int samples, C2DAudioCallback cb) : Audio(freq, s
+         printf("\t%d - %s\n", i, SDL_GetAudioDeviceName(i, 0));
+     }
+ 
+-    SDL_AudioSpec wanted, obtained;
++    SDL_AudioSpec wanted{}, obtained{};
+     wanted.freq = freq;
+     wanted.format = AUDIO_S16SYS;
+     wanted.channels = (Uint8) channels;
+@@ -74,6 +94,9 @@ SDL2Audio::SDL2Audio(int freq, int samples, C2DAudioCallback cb) : Audio(freq, s
+     deviceID = SDL_OpenAudioDevice(nullptr, 0, &wanted, &obtained, 0);
+     if (deviceID == 0u) {
+         printf("SDL2Audio: unable to open audio: %s\n", SDL_GetError());
++#if defined(__PS5__)
++        audioBootStatus("AUDIO SDL device open failed");
++#endif
+         available = false;
+         return;
+     }
+@@ -94,6 +117,9 @@ SDL2Audio::SDL2Audio(int freq, int samples, C2DAudioCallback cb) : Audio(freq, s
+ 
+     SDL_PauseAudioDevice(deviceID, 1);
+     available = true;
++#if defined(__PS5__)
++    if (pemu_boot_mark) pemu_boot_mark("AUDIO PS5 device open ok");
++#endif
+ }
+ 
+ SDL2Audio::~SDL2Audio() {
+@@ -112,6 +138,9 @@ void SDL2Audio::pause(int pause) {
+         SDL_PauseAudioDevice(deviceID, pause);
+     }
+ 
++#if defined(__PS5__)
++    if (pause) { lock(); m_priming = true; unlock(); }
++#endif
+     Audio::pause(pause);
+ }
+ 
+@@ -120,9 +149,34 @@ void SDL2Audio::reset() {
+         SDL_PauseAudioDevice(deviceID, 1);
+     }
+ 
++#if defined(__PS5__)
++    lock(); m_priming = true; unlock();
++#endif
+     Audio::reset();
+ }
+ 
+ SDL_AudioDeviceID SDL2Audio::getDeviceID() {
+     return deviceID;
+ }
++
++#if defined(__PS5__)
++void SDL2Audio::fillBufferedAudio(Uint8 *stream, int len) {
++    memset(stream, 0, len);
++    const int wanted = len / (int)sizeof(int16_t);
++    lock();
++    const int queued = getSampleBufferQueued();
++    // Two emulated frames (~33 ms at 60Hz) absorb a short late frame.
++    // Also require one full callback block before the first pull.
++    const int reserve = getSamples() * getChannels() * 2;
++    if (m_priming && queued < (wanted > reserve ? wanted : reserve)) {
++        unlock();
++        return;
++    }
++    m_priming = false;
++    int available = queued < wanted ? queued : wanted;
++    available -= available % getChannels();
++    if (available) getSampleBuffer()->pull((int16_t *)stream, available);
++    if (available < wanted) m_priming = true;
++    unlock();
++}
++#endif
+diff --git a/source/platforms/sdl2/sdl2_input.cpp b/source/platforms/sdl2/sdl2_input.cpp
+index 8525571..6e5b38a 100644
+--- a/source/platforms/sdl2/sdl2_input.cpp
++++ b/source/platforms/sdl2/sdl2_input.cpp
+@@ -6,6 +6,10 @@
+ 
+ using namespace c2d;
+ 
++#if defined(__PS5__) || defined(__PROSPERO__)
++extern "C" void pemu_native_input_probe(unsigned) __attribute__((weak));
++#endif
++
+ SDL2Input::SDL2Input() : Input() {
+     if (SDL_WasInit(SDL_INIT_GAMECONTROLLER) == 0) {
+         SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+@@ -42,11 +46,31 @@ SDL2Input::SDL2Input() : Input() {
+ }
+ 
+ Input::Player *SDL2Input::update() {
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(2);
++#endif
+     bool quit = false;
++#if defined(__PS5__) || defined(__PROSPERO__)
++    unsigned pressed[PLAYER_MAX] = {};
++#endif
+ 
+     // be sure sdl events are "pumped/cleared" before calling Input::update
+     SDL_Event event = {};
+     while (SDL_PollEvent(&event)) {
++#if defined(__PS5__) || defined(__PROSPERO__)
++        // Menu input must retain a short DOWN/UP pair drained in one poll.
++        // Running games keep the latest-state behavior (repeat is disabled).
++        if (getRepeatDelay() > 0 && event.type == SDL_CONTROLLERBUTTONDOWN) {
++            for (int i = 0; i < PLAYER_MAX; ++i) {
++                auto pad = static_cast<SDL_GameController *>(m_players[i].data);
++                if (!m_players[i].enabled || !pad ||
++                    SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad)) != event.cbutton.which)
++                    continue;
++                for (const auto &mapping : m_players[i].mapping)
++                    if (mapping.value == event.cbutton.button) pressed[i] |= mapping.button;
++            }
++        }
++#endif
+         if (event.type == SDL_QUIT) {
+             quit = true;
+             break;
+@@ -54,10 +78,23 @@ Input::Player *SDL2Input::update() {
+     }
+ 
+     Player *players = Input::update();
++#if defined(__PS5__) || defined(__PROSPERO__)
++    for (int i = 0; i < PLAYER_MAX; ++i) {
++        if (pressed[i]) {
++            Player edge{};
++            edge.buttons = pressed[i];
++            applyRotation(&edge);
++            players[i].buttons = (players[i].buttons & ~Input::Button::Delay) | edge.buttons;
++        }
++    }
++#endif
+     if (quit) {
+         players[0].buttons |= Input::Button::Quit;
+     }
+ 
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(3);
++#endif
+     return players;
+ }
+ 
 diff --git a/source/platforms/sdl2/sdl2_renderer.cpp b/source/platforms/sdl2/sdl2_renderer.cpp
-index aad7887..04e69a7 100644
+index aad7887..6693432 100644
 --- a/source/platforms/sdl2/sdl2_renderer.cpp
 +++ b/source/platforms/sdl2/sdl2_renderer.cpp
-@@ -26,12 +26,19 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
+@@ -6,6 +6,10 @@
+ 
+ using namespace c2d;
+ 
++#if defined(__PS5__) || defined(__PROSPERO__)
++extern "C" void pemu_native_input_probe(unsigned) __attribute__((weak));
++#endif
++
+ static SDL_Window *window = nullptr;
+ static SDL_GLContext context = nullptr;
+ 
+@@ -26,12 +30,19 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
      }
  
      Vector2i size = {(int) Renderer::getSize().x, (int) Renderer::getSize().y};
@@ -405,7 +819,7 @@ index aad7887..04e69a7 100644
  #else
      flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
  #endif
-@@ -46,7 +53,10 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
+@@ -46,7 +57,10 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
      SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
  #else
      SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -417,7 +831,7 @@ index aad7887..04e69a7 100644
      SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
      SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
  #elif __GL1__
-@@ -92,6 +102,15 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
+@@ -92,6 +106,15 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
          return;
      }
  
@@ -433,7 +847,7 @@ index aad7887..04e69a7 100644
      SDL_GL_SetSwapInterval(1);
  
  #if __GLAD__
-@@ -107,13 +126,44 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
+@@ -107,13 +130,44 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
  #endif
  
      initGL();
@@ -480,7 +894,7 @@ index aad7887..04e69a7 100644
      printf("SDL2Renderer(%p): platform: %s, resolution: %i x %i, display: %i x %i\n",
             this, C2DDevice::getName().c_str(),
             (int) m_size.x, (int) m_size.y, display.x, display.y);
-@@ -122,20 +172,33 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
+@@ -122,20 +176,39 @@ SDL2Renderer::SDL2Renderer(const Vector2f &s) : GLRenderer(s) {
  void SDL2Renderer::setFullscreen(const bool value) {
      if (!value) return;
  
@@ -506,7 +920,13 @@ index aad7887..04e69a7 100644
      GLRenderer::flip(draw, inputs);
  
      // flip
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(6);
++#endif
      SDL_GL_SwapWindow(window);
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(7);
++#endif
 +#if defined(__PS5__)
 +    PS5Profiler::end(PS5Profiler::Present);
 +    PS5Profiler::endFrame();
@@ -514,34 +934,6 @@ index aad7887..04e69a7 100644
  }
  
  void SDL2Renderer::delay(unsigned int ms) {
-diff --git a/include/cross2d/skeleton/ps5_profiler.h b/include/cross2d/skeleton/ps5_profiler.h
-new file mode 100644
-index 0000000..fb78f99
---- /dev/null
-+++ b/include/cross2d/skeleton/ps5_profiler.h
-@@ -0,0 +1,22 @@
-+#ifndef C2D_PS5_PROFILER_H
-+#define C2D_PS5_PROFILER_H
-+
-+#include <string>
-+
-+namespace c2d {
-+namespace PS5Profiler {
-+
-+enum Stage { Core, Upload, VideoDraw, CRTDraw, UIDraw, Present, Frame };
-+
-+void beginFrame();
-+void begin(Stage stage);
-+void end(Stage stage);
-+void endFrame();
-+void setGameInfo(int width, int height, int pitch, const char *format);
-+void setShader(const char *name);
-+void setDisplaySize(int width, int height);
-+
-+} // namespace PS5Profiler
-+} // namespace c2d
-+
-+#endif
 diff --git a/source/skeleton/ps5_profiler.cpp b/source/skeleton/ps5_profiler.cpp
 new file mode 100644
 index 0000000..1a60b2d
@@ -619,4 +1011,116 @@ index 0000000..1a60b2d
 +void setGameInfo(int,int,int,const char*) {} void setShader(const char*) {} void setDisplaySize(int,int) {}
 +} }
 +#endif
-
+diff --git a/source/skeleton/renderer.cpp b/source/skeleton/renderer.cpp
+index c78c921..7b4322d 100644
+--- a/source/skeleton/renderer.cpp
++++ b/source/skeleton/renderer.cpp
+@@ -6,6 +6,10 @@
+ 
+ using namespace c2d;
+ 
++#if defined(__PS5__) || defined(__PROSPERO__)
++extern "C" void pemu_native_input_probe(unsigned) __attribute__((weak));
++#endif
++
+ Renderer *c2d_renderer = nullptr;
+ 
+ #ifdef __SWITCH__
+@@ -53,7 +57,13 @@ void Renderer::onUpdate() {
+         for (int i = 0; i < PLAYER_MAX; i++) {
+             unsigned int buttons = players[i].buttons;
+             if (buttons > 0 && buttons != Input::Button::Delay) {
++#if defined(__PS5__) || defined(__PROSPERO__)
++                if (pemu_native_input_probe) pemu_native_input_probe(4);
++#endif
+                 onInput(players);
++#if defined(__PS5__) || defined(__PROSPERO__)
++                if (pemu_native_input_probe) pemu_native_input_probe(5);
++#endif
+                 break;
+             }
+         }
+@@ -64,13 +74,36 @@ void Renderer::onUpdate() {
+ 
+ void Renderer::flip(bool draw, bool inputs) {
+     m_process_inputs = inputs;
++
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(8);
++#endif
+     onUpdate();
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(9);
++#endif
+ 
+     // call base class (draw childs)
+     if (draw) {
++
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(10);
++#endif
+         clear();
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(11);
++#endif
++
+         Transform trans = Transform::Identity;
++
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(12);
++#endif
+         Rectangle::onDraw(trans, draw);
++#if defined(__PS5__) || defined(__PROSPERO__)
++    if (pemu_native_input_probe) pemu_native_input_probe(13);
++#endif
++
+     }
+ }
+ 
+diff --git a/source/skeleton/sfml/VertexArray.cpp b/source/skeleton/sfml/VertexArray.cpp
+index e62b9c2..f297efb 100644
+--- a/source/skeleton/sfml/VertexArray.cpp
++++ b/source/skeleton/sfml/VertexArray.cpp
+@@ -29,6 +29,10 @@
+ #include "cross2d/c2d.h"
+ #include "cross2d/skeleton/sfml/VertexArray.hpp"
+ 
++#if defined(__PS5__) && defined(__GL2__)
++#include "cross2d/platforms/gl2/ps5_triangles.h"
++#endif
++
+ namespace c2d {
+ ////////////////////////////////////////////////////////////
+     VertexArray::VertexArray() :
+@@ -88,7 +92,13 @@ namespace c2d {
+ 
+ ////////////////////////////////////////////////////////////
+     void VertexArray::setPrimitiveType(PrimitiveType type) {
++#if defined(__PS5__) && defined(__GL2__)
++        if (m_primitiveType == type) return;
++#endif
+         m_primitiveType = type;
++#if defined(__PS5__) && defined(__GL2__)
++        update(); // The GPU representation depends on topology on PS5.
++#endif
+     }
+ 
+ 
+@@ -147,7 +157,17 @@ namespace c2d {
+         //printf("VertexArray::update(%p): vbo: %i, vertices: %lu, size: %lu\n",
+           //     this, vbo, m_vertices.size(), sizeof(Vertex) * m_vertices.size());
+         GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, vbo));
++#if defined(__PS5__)
++        std::vector<Vertex> triangles;
++        const auto *upload = &m_vertices;
++        if (ps5TriangleList(m_primitiveType)) {
++            ps5ExpandTriangles(m_vertices, m_primitiveType, triangles);
++            upload = &triangles;
++        }
++        GL_CHECK(glBufferData(GL_ARRAY_BUFFER, sizeof(Vertex) * upload->size(), upload->data(), GL_STREAM_DRAW));
++#else
+         GL_CHECK(glBufferData(GL_ARRAY_BUFFER, sizeof(Vertex) * m_vertices.size(), m_vertices.data(), GL_STREAM_DRAW));
++#endif
+         GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, 0));
+ #endif
+     }

@@ -172,10 +172,7 @@ jobs:
       - name: Configure
         run: |
           cd $GITHUB_WORKSPACE
-          git -C external/libcross2d apply patches/ps5/libcross2d-ps5-opengl.patch
-          git -C external/libcross2d diff --check
-          git -C external/cores/FBNeo apply patches/ps5/fbneo-ps5-native-video-owner.patch
-          git -C external/cores/FBNeo diff --check
+          bash tools/ps5/apply-source-patches.sh
           mkdir build-pemu && cd build-pemu
           "$PS5_PAYLOAD_SDK/bin/prospero-cmake" \
             -DPLATFORM_PS5=ON \

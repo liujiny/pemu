@@ -83,7 +83,10 @@ public:
 
     void loadState() {
         printf("StateLoad: %s\n", path);
-        ui->getUiStateMenu()->loadStateCore(path);
+        if (!ui->getUiStateMenu()->loadStateCore(path)) {
+            middle_text->setString("LOAD FAILED");
+            middle_text->setVisibility(Visibility::Visible);
+        }
     }
 
     void saveState() {
@@ -91,6 +94,9 @@ public:
         if (ui->getUiStateMenu()->saveStateCore(path)) {
             ui->getUiEmu()->getVideo()->save(shot);
             loadTexture();
+        } else {
+            middle_text->setString("SAVE FAILED");
+            middle_text->setVisibility(Visibility::Visible);
         }
     }
 

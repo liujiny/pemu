@@ -278,16 +278,23 @@ endif ()
 set(SRC ${SRC_PFBA} ${SRC_CPU} ${SRC_DRV} ${SRC_BURN} ${SRC_BURNER} ${SRC_INTF} ${SRC_7Z} ${SRC_CHDR})
 
 #####################
-# pfbneo executable
+# PS5 video ownership
 #####################
-if (PLATFORM_PS5 AND PS5_NATIVE_APP)
-    # Load FBNeo's platform declarations first, then suppress registration of
-    # its desktop SDL presenters. pEmu/libcross2d remains the sole owner of the
-    # native window, GL context, and present operation.
+# On both HBL payload and native-app builds, pEmu/libcross2d owns the
+# SDL/OpenGL presentation path.  FBNeo's vid_interface.cpp is still needed
+# for its shared video state, but its standalone SDL2 presenters must not
+# be registered.
+if (PLATFORM_PS5)
     set_source_files_properties(
             ${CMAKE_SOURCE_DIR}/external/cores/FBNeo/src/intf/video/vid_interface.cpp
             PROPERTIES COMPILE_OPTIONS
             "-include;${CMAKE_CURRENT_SOURCE_DIR}/sources/fbneo/ps5_native_video_owner.h")
+endif ()
+
+#####################
+# pfbneo executable
+#####################
+if (PLATFORM_PS5 AND PS5_NATIVE_APP)
     add_library(${PROJECT_NAME}_ps5_native_core STATIC
             ${SRC} ${CMAKE_CURRENT_BINARY_DIR}/deps/m68kops.c)
     set_target_properties(${PROJECT_NAME}_ps5_native_core PROPERTIES

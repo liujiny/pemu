@@ -5,6 +5,14 @@
 #include "pemu.h"
 #include "ss_api.h"
 
+
+#if defined(__PS5__) || defined(__PROSPERO__)
+extern "C" void pemu_boot_mark(const char *) __attribute__((weak));
+#define LOAD_TRACE(s) do { if (pemu_boot_mark) pemu_boot_mark("GAME_LOAD " s); } while (0)
+#else
+#define LOAD_TRACE(s) ((void)0)
+#endif
+
 using namespace c2d;
 using namespace c2d::config;
 using namespace pemu;
@@ -257,8 +265,11 @@ bool UIRomList::onInput(c2d::Input::Player *players) {
             pRomInfo->mpvTexture->setVisibility(c2d::Visibility::Hidden);
             pRomInfo->mpv->stop();
 #endif
+            LOAD_TRACE("config begin");
             pMain->getConfig()->loadGame(game);
+            LOAD_TRACE("config ok");
             pMain->getUiEmu()->load(game);
+            LOAD_TRACE("load returned");
             return true;
         }
     } else if (buttons & Input::Button::X) {

@@ -18,6 +18,14 @@
 #include "pfbneo_utility.h"
 #include "retro_input_wrapper.h"
 
+
+#if defined(__PS5__) || defined(__PROSPERO__)
+extern "C" void pemu_boot_mark(const char *) __attribute__((weak));
+#define LOAD_TRACE(s) do { if (pemu_boot_mark) pemu_boot_mark("GAME_LOAD " s); } while (0)
+#else
+#define LOAD_TRACE(s) ((void)0)
+#endif
+
 using namespace c2d;
 using namespace pemu;
 
@@ -380,6 +388,7 @@ if (strncmp(p, "cheat", 5) == 0 && (p[5] == ' ' || p[5] == '\t' || p[5] == '\"')
 }
 
 int PFBAUiEmu::load(const ss_api::Game &game) {
+    LOAD_TRACE("frontend begin");
     currentGame = game;
     PFBNEOUtility::setDriverActive(game);
     if (nBurnDrvActive >= nBurnDrvCount) {
@@ -397,15 +406,26 @@ int PFBAUiEmu::load(const ss_api::Game &game) {
     if (bForce60Hz) nBurnFPS = 6000;
 
     EnableHiscores = 1;
+    LOAD_TRACE("temporary audio begin");
     auto *aud = new Audio(audio_freq);
+    LOAD_TRACE("temporary audio ok");
     nBurnSoundRate = aud->getSampleRate();
     nBurnSoundLen = aud->getSamples();
-    pBurnSoundOut = (INT16 *) malloc(aud->getSamplesSize());
+    pBurnSoundOut = (INT16 *) calloc(1, aud->getSamplesSize());
+    if (!pBurnSoundOut) {
+        LOAD_TRACE("temporary audio buffer allocation failed");
+        delete aud;
+        pMain->getUiProgressBox()->setVisibility(Visibility::Hidden);
+        pMain->getUiMessageBox()->show("ERROR", "AUDIO BUFFER ALLOCATION FAILED", "OK");
+        return -1;
+    }
 
     bCheatsAllowed = pMain->getConfig()->get(PEMUConfig::OptId::EMU_CHEATS, true)->getInteger();
     CheatInit();
 
+    LOAD_TRACE("driver init begin");
     if (DrvInit((int) nBurnDrvActive, false) != 0) {
+        LOAD_TRACE("driver init failed");
         delete (aud);
         pMain->getUiProgressBox()->setVisibility(Visibility::Hidden);
         pMain->getUiMessageBox()->show("ERROR", "DRIVER INIT FAILED", "OK");
@@ -431,19 +451,35 @@ int PFBAUiEmu::load(const ss_api::Game &game) {
             }
         }
     }
+    LOAD_TRACE("driver and cheats ok");
     delete (aud);
     free(pBurnSoundOut);
+    pBurnSoundOut = nullptr;
     nFramesEmulated = 0; nFramesRendered = 0; nCurrentFrame = 0;
 
+    LOAD_TRACE("game audio begin");
     addAudio(audio_freq, Audio::toSamples(audio_freq, (float) nBurnFPS / 100.0f));
+    // The emulated sound chips still run when the host device is unavailable.
+    // Never leave them pointing at the freed driver-initialization buffer.
+    nBurnSoundRate = audio->getSampleRate();
+    nBurnSoundLen = audio->getSamples();
+    pBurnSoundOut = (INT16 *) calloc(1, audio->getSamplesSize());
+    if (!pBurnSoundOut) {
+        LOAD_TRACE("game audio buffer allocation failed");
+        stop();
+        pMain->getUiProgressBox()->setVisibility(Visibility::Hidden);
+        pMain->getUiMessageBox()->show("ERROR", "AUDIO BUFFER ALLOCATION FAILED", "OK");
+        return -1;
+    }
     if (audio->isAvailable()) {
-        nBurnSoundRate = audio->getSampleRate();
-        nBurnSoundLen = audio->getSamples();
-        pBurnSoundOut = (INT16 *) malloc(audio->getSamplesSize());
+        LOAD_TRACE("audio device available; mix buffer owned");
+    } else {
+        LOAD_TRACE("audio device unavailable; mix buffer owned");
     }
     audio_sync = !bForce60Hz;
     targetFps = (float) nBurnFPS / 100.0f;
 
+    LOAD_TRACE("game audio ok");
     Vector2i size, aspect;
     BurnDrvGetFullSize(&size.x, &size.y);
     BurnDrvGetAspect(&aspect.x, &aspect.y);
@@ -459,10 +495,15 @@ int PFBAUiEmu::load(const ss_api::Game &game) {
         delete video;
         video = nullptr;
     }
+    LOAD_TRACE("video create begin");
     auto v = new PFBAVideo(pMain, &pBurnDraw, &nBurnPitch, size, aspect);
+    LOAD_TRACE("video create ok");
     addVideo(v);
+    LOAD_TRACE("video attach ok");
 
+    LOAD_TRACE("cheat menu begin");
     CreateCheatMenu(pMain);
+    LOAD_TRACE("cheat menu ok");
     cheatMenuVisible = false;
     cheatMenuSelected = 0;
     cheatMenuScroll = 0;
@@ -470,7 +511,10 @@ int PFBAUiEmu::load(const ss_api::Game &game) {
         cheatMenuBg->setVisibility(Visibility::Hidden);
     }
 
-    return UiEmu::load(game);
+    LOAD_TRACE("UI transition begin");
+    int result = UiEmu::load(game);
+    LOAD_TRACE("UI transition ok");
+    return result;
 }
 
 void Reinitialise(void) {

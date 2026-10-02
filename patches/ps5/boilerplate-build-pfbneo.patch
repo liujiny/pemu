@@ -1,7 +1,7 @@
 diff --git a/tools/build-pfbneo.sh b/tools/build-pfbneo.sh
 --- a/tools/build-pfbneo.sh
 +++ b/tools/build-pfbneo.sh
-@@ -111,12 +111,16 @@
+@@ -109,12 +109,16 @@
  definitions=()
  includes=()
  archives=()
@@ -18,8 +18,9 @@ diff --git a/tools/build-pfbneo.sh b/tools/build-pfbneo.sh
  [[ -z ${PACBREW_PACKAGES:-} ]] || read -r -a pacbrew_packages <<< "$PACBREW_PACKAGES"
  [[ -z ${PACBREW_INCLUDE_PATHS:-} ]] || read -r -a pacbrew_includes <<< "$PACBREW_INCLUDE_PATHS"
  [[ -z ${PACBREW_STATIC_ARCHIVES:-} ]] || read -r -a pacbrew_archives <<< "$PACBREW_STATIC_ARCHIVES"
-@@ -187,12 +191,32 @@
- 
+@@ -187,16 +191,40 @@
+     -c "$native/app_cpp_runtime.cpp" -o "$build/obj/app_cpp_runtime.o"
+
  link_inputs=("$build/obj/app_crt.o" "$build/obj/app_cpp_runtime.o" "${objects[@]}")
 +if (( ${#archives[@]} > 0 )); then
 +    link_inputs+=(--start-group)
@@ -30,7 +31,7 @@ diff --git a/tools/build-pfbneo.sh b/tools/build-pfbneo.sh
          echo "invalid static archive: $archive" >&2; exit 2;
      }
      link_inputs+=("$root/$archive")
- done
++done
 +if (( ${#archives[@]} > 0 )); then
 +    link_inputs+=(--end-group)
 +fi
@@ -45,15 +46,27 @@ diff --git a/tools/build-pfbneo.sh b/tools/build-pfbneo.sh
 +        echo "invalid forced symbol: $symbol" >&2; exit 2;
 +    }
 +    link_inputs+=(-u "$symbol")
-+done
+ done
  if (( ${#pacbrew_libs[@]} > 0 )); then
      link_inputs+=(--start-group "${pacbrew_libs[@]}" --end-group)
  fi
  "$sdk_root/bin/prospero-lld" -T "$native/ps5-pie.ld" --eh-frame-hdr \
-+    --wrap=malloc --wrap=calloc --wrap=realloc --wrap=free \
++    --wrap=main --wrap=malloc --wrap=calloc --wrap=realloc --wrap=free \
 +    --wrap=posix_memalign --wrap=malloc_usable_size \
++    --wrap=getcwd --wrap=opendir --wrap=fdopendir --wrap=readdir \
++    --wrap=closedir --wrap=dirfd --wrap=rewinddir \
 +    -L "$root/.local/lib" \
 +    -L "$sdk_root/target/lib" \
      --version-script "$native/app-symbols.map" \
      -e _start -o "$build/llvm-pie.elf" "${link_inputs[@]}" \
      --as-needed "$sdk_root"/target/lib/*.so
+@@ -215,6 +241,9 @@
+     [[ -f $root/sce_sys/$asset ]] && cp "$root/sce_sys/$asset" "$app/sce_sys/$asset"
+ done
+ [[ ! -d $root/assets ]] || cp -a "$root/assets" "$app/assets"
++# POSIXIo resolves skins/fonts relative to the native title working directory.
++[[ ! -d $root/data_romfs ]] || cp -a "$root/data_romfs" "$app/data_romfs"
++[[ ! -d $root/data_datadir ]] || cp -a "$root/data_datadir/." "$app/"
+
+ [[ -f $root/runtime/libc.prx ]] || bash "$root/tools/rebuild-libc.sh"
+ (cd "$root/runtime" && sha256sum --check --strict libc.prx.sha256)

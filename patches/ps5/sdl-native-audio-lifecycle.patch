@@ -1,0 +1,32 @@
+--- a/src/audio/ps5/SDL_ps5audio.c
++++ b/src/audio/ps5/SDL_ps5audio.c
+@@ -77,11 +77,12 @@
+ 					   PROSPERO_AUDIO_OUT_PORT_TYPE_MAIN,
+ 					   0, this->spec.samples, 48000, fmt);
+     if (this->hidden->handle < 1) {
+-        return SDL_SetError("sceAudioOutOpen: %s", strerror(this->hidden->handle));
++        return SDL_SetError("sceAudioOutOpen: 0x%08x", (unsigned)this->hidden->handle);
+     }
+ 
+     this->hidden->mixlen = this->spec.size;
+     this->hidden->mixbuf = (Uint8 *)SDL_calloc(1, this->hidden->mixlen);
++    if (!this->hidden->mixbuf) return SDL_OutOfMemory();
+ 
+     return 0;
+ }
+@@ -130,8 +131,13 @@
+ {
+     static SDL_bool need_init = SDL_TRUE;
+ 
+-    if (need_init && sceAudioOutInit()) {
+-        return SDL_FALSE;
++    /* Native titles can inherit an already initialized AudioOut service. */
++    if (need_init) {
++        int32_t result = sceAudioOutInit();
++        if (result != 0 && (uint32_t)result != 0x8026000eU) {
++            SDL_SetError("sceAudioOutInit: 0x%08x", (unsigned)result);
++            return SDL_FALSE;
++        }
+     }
+ 
+     need_init = SDL_FALSE;

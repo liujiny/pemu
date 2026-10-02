@@ -1,0 +1,22 @@
+--- a/src/joystick/ps5/SDL_ps5joystick.c
++++ b/src/joystick/ps5/SDL_ps5joystick.c
+@@ -90,7 +90,7 @@
+     PS5_PAD_BUTTON_SQUARE,    // x:b2
+     PS5_PAD_BUTTON_TRIANGLE,  // y:b3
+     PS5_PAD_BUTTON_TOUCH_PAD, // touchpad:b4
+-    -1,                       // back:b5
++    PS5_PAD_BUTTON_TOUCH_PAD, // back:b5: coin / Select in pEMU
+     PS5_PAD_BUTTON_OPTIONS,   // start:b6
+     PS5_PAD_BUTTON_L3,        // leftstick:b7
+     PS5_PAD_BUTTON_R3,        // rightstick:b8
+@@ -149,8 +149,8 @@
+     out->y.target = 3;
+     out->touchpad.kind = EMappingKind_Button;
+     out->touchpad.target = 4;
+-    // out->back.kind = EMappingKind_Button;
+-    // out->back.target = 5;
++    out->back.kind = EMappingKind_Button;
++    out->back.target = 5;
+     out->start.kind = EMappingKind_Button;
+     out->start.target = 6;
+     out->leftstick.kind = EMappingKind_Button;
