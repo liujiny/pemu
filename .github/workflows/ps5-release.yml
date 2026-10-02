@@ -1,9 +1,6 @@
 name: ps5-release
 
 on:
-  push:
-    tags:
-      - "v*.*"
   workflow_dispatch:
 
 jobs:
